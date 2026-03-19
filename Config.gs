@@ -263,6 +263,14 @@ var SyncUtils = (function() {
     return 'STEP-' + normalized;
   }
 
+  function sanitizeDriveName(value, fallback) {
+    var sanitized = asString(value)
+      .replace(/[\\/:*?"<>|#\[\]]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return sanitized || fallback || 'Untitled';
+  }
+
   function getUserEmail() {
     var email = '';
     try {
@@ -301,6 +309,7 @@ var SyncUtils = (function() {
     mergeObjects: mergeObjects,
     stableHashObject: stableHashObject,
     formatStepId: formatStepId,
+    sanitizeDriveName: sanitizeDriveName,
     getUserEmail: getUserEmail,
     serializeSummary: serializeSummary
   };
@@ -325,8 +334,10 @@ var ConfigService = (function() {
       BACKUP_BEFORE_WRITE: 'TRUE',
       CREATE_MISSING_CP_ROWS: 'TRUE',
       CREATE_MISSING_WI_SECTION: 'TRUE',
+      CREATE_MISSING_WI_DOCS: 'FALSE',
       AUTO_CREATE_IDS: 'TRUE',
       DEFAULT_WI_DOC_ID: '',
+      WI_TEMPLATE_DOC_ID: '',
       WI_FOLDER_ID: '',
       BACKUP_FOLDER_ID: ''
     };
@@ -369,8 +380,10 @@ var ConfigService = (function() {
       BACKUP_BEFORE_WRITE: SyncUtils.toBoolean(rawConfig.BACKUP_BEFORE_WRITE),
       CREATE_MISSING_CP_ROWS: SyncUtils.toBoolean(rawConfig.CREATE_MISSING_CP_ROWS),
       CREATE_MISSING_WI_SECTION: SyncUtils.toBoolean(rawConfig.CREATE_MISSING_WI_SECTION),
+      CREATE_MISSING_WI_DOCS: SyncUtils.toBoolean(rawConfig.CREATE_MISSING_WI_DOCS),
       AUTO_CREATE_IDS: SyncUtils.toBoolean(rawConfig.AUTO_CREATE_IDS),
       DEFAULT_WI_DOC_ID: SyncUtils.asString(rawConfig.DEFAULT_WI_DOC_ID),
+      WI_TEMPLATE_DOC_ID: SyncUtils.asString(rawConfig.WI_TEMPLATE_DOC_ID),
       WI_FOLDER_ID: SyncUtils.asString(rawConfig.WI_FOLDER_ID),
       BACKUP_FOLDER_ID: SyncUtils.asString(rawConfig.BACKUP_FOLDER_ID)
     };
@@ -471,8 +484,10 @@ var ConfigService = (function() {
       BACKUP_BEFORE_WRITE: 'TRUE to create Drive backups before bulk writes.',
       CREATE_MISSING_CP_ROWS: 'TRUE to append missing Control Plan rows.',
       CREATE_MISSING_WI_SECTION: 'TRUE to append missing Work Instruction sections.',
+      CREATE_MISSING_WI_DOCS: 'TRUE to create a dedicated Google Doc when a PFMEA step has no WI_DOC_ID.',
       AUTO_CREATE_IDS: 'TRUE to auto-generate PFMEA_ROW_ID and STEP_ID when blank.',
       DEFAULT_WI_DOC_ID: 'Fallback Google Doc ID for Work Instructions.',
+      WI_TEMPLATE_DOC_ID: 'Optional Google Doc template copied when creating new Work Instructions.',
       WI_FOLDER_ID: 'Folder that stores Work Instruction docs.',
       BACKUP_FOLDER_ID: 'Folder that stores backup copies.'
     };

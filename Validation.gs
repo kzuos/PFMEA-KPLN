@@ -105,6 +105,14 @@ var ValidationService = (function() {
       }
     }
 
+    if (config.WI_TEMPLATE_DOC_ID) {
+      try {
+        DocumentApp.openById(config.WI_TEMPLATE_DOC_ID);
+      } catch (error) {
+        warnings.push('WI_TEMPLATE_DOC_ID is not accessible.');
+      }
+    }
+
     if (config.WI_FOLDER_ID) {
       try {
         DriveApp.getFolderById(config.WI_FOLDER_ID);

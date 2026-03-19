@@ -121,6 +121,8 @@ Rules:
 - All manual content outside the markers is preserved.
 - Only the content between the matching markers is rewritten.
 - If a section is missing and `CREATE_MISSING_WI_SECTION=TRUE`, it is appended automatically.
+- If a PFMEA step has no `WI_DOC_ID` and `CREATE_MISSING_WI_DOCS=TRUE`, the system creates a dedicated Google Doc for that step and writes the new `WI_DOC_ID` back to PFMEA.
+- If `WI_TEMPLATE_DOC_ID` is configured, new Work Instructions are copied from that template before the managed section is inserted.
 - If a section contains `[[LOCKED:STEP-OP10]]`, it is skipped and logged.
 - Work Instruction content is aggregated at `STEP_ID` level, which is more realistic for automotive process instructions than one PFMEA row per document section.
 
@@ -160,6 +162,8 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 8. Review the seeded `PFMEA`, `CONTROL_PLAN`, `MAPPING`, `CHANGE_LOG`, and `CONFIG` tabs.
 9. Adjust config values as needed:
    - `DEFAULT_WI_DOC_ID`
+   - `CREATE_MISSING_WI_DOCS`
+   - `WI_TEMPLATE_DOC_ID`
    - `WI_FOLDER_ID`
    - `BACKUP_FOLDER_ID`
    - `SYNC_MODE`
@@ -185,9 +189,10 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 1. A quality engineer edits PFMEA row `PFR-1234ABCD` for `STEP-OP10`.
 2. The installable edit trigger detects the row change.
 3. The system recalculates mapped values and updates the linked `CONTROL_PLAN` row with the same `PFMEA_ROW_ID`.
-4. The system opens the target Google Doc and updates the section between `[[STEP_START:STEP-OP10]]` and `[[STEP_END:STEP-OP10]]`.
-5. `CHANGE_LOG` receives entries for Control Plan update, Work Instruction update, and the row-level sync summary.
-6. If the PFMEA row is inactive, the downstream artifacts are flagged inactive instead of being deleted.
+4. If the PFMEA step has no assigned `WI_DOC_ID` and auto-create is enabled, the system creates a dedicated Google Doc, stores that `WI_DOC_ID` back in PFMEA, and then updates the managed section.
+5. The system opens the target Google Doc and updates the section between `[[STEP_START:STEP-OP10]]` and `[[STEP_END:STEP-OP10]]`.
+6. `CHANGE_LOG` receives entries for Control Plan update, Work Instruction creation/assignment if applicable, Work Instruction section update, and the row-level sync summary.
+7. If the PFMEA row is inactive, the downstream artifacts are flagged inactive instead of being deleted.
 
 ## Safety controls in the MVP
 - dry-run preview mode

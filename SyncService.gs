@@ -278,8 +278,13 @@ var SyncService = (function() {
       return summary;
     }
 
+    mergeSummary_(summary, prepareWorkInstructionAssignments_(record, allStepRecords, context));
+
     var groupedByDoc = groupRecordsByWorkInstruction_(allStepRecords, context.config);
     Object.keys(groupedByDoc).forEach(function(docId) {
+      if (docId.indexOf('PREVIEW-') === 0) {
+        return;
+      }
       var recordsForDoc = groupedByDoc[docId];
       var activeRecords = recordsForDoc.filter(function(stepRecord) {
         return isActiveRecord_(stepRecord.values);
@@ -326,6 +331,82 @@ var SyncService = (function() {
     return summary;
   }
 
+  function prepareWorkInstructionAssignments_(record, stepRecords, context) {
+    var summary = createSummary_(context.dryRun);
+    var stepId = stepRecords[0].values.STEP_ID || record.values.STEP_ID;
+    var blankRecords = stepRecords.filter(function(stepRecord) {
+      return SyncUtils.isBlank(stepRecord.values.WI_DOC_ID);
+    });
+
+    if (!blankRecords.length) {
+      return summary;
+    }
+
+    var accessibleDocIds = SyncUtils.unique(stepRecords.map(function(stepRecord) {
+      var docId = SyncUtils.asString(stepRecord.values.WI_DOC_ID);
+      return DocsService.isDocumentAccessible(docId) ? docId : '';
+    }));
+
+    if (accessibleDocIds.length === 1) {
+      applyWorkInstructionDocId_(blankRecords, accessibleDocIds[0], context, summary, record, 'ASSIGN_EXISTING_WI_DOC_ID', 'Blank PFMEA WI_DOC_ID values were linked to the existing step document.');
+      return summary;
+    }
+
+    if (accessibleDocIds.length > 1) {
+      summary.skipped += 1;
+      summary.logEntries.push(
+        buildTargetLogEntry_(
+          context,
+          record,
+          APP_CONSTANTS.TARGET_TYPES.WORK_INSTRUCTION,
+          stepRecords[0].values.STEP_ID,
+          'AMBIGUOUS_WI_DOC_ASSIGNMENT',
+          APP_CONSTANTS.STATUS.SKIPPED,
+          '',
+          '',
+          'Multiple Work Instruction documents already exist for step ' + stepRecords[0].values.STEP_ID + '. Blank WI_DOC_ID values were not auto-assigned.'
+        )
+      );
+      return summary;
+    }
+
+    if (!context.config.CREATE_MISSING_WI_DOCS) {
+      return summary;
+    }
+
+    var seedRecord = chooseSeedRecordForStep_(stepRecords);
+    var creationResult = DocsService.ensureWorkInstructionDocument(stepId, seedRecord.values, {
+      dryRun: context.dryRun,
+      createMissingDocument: true,
+      defaultDocId: context.config.DEFAULT_WI_DOC_ID,
+      templateDocId: context.config.WI_TEMPLATE_DOC_ID,
+      folderId: context.config.WI_FOLDER_ID
+    });
+
+    if (creationResult.status === APP_CONSTANTS.STATUS.ERROR) {
+      summary.errors += 1;
+      summary.logEntries.push(
+        buildTargetLogEntry_(context, record, APP_CONSTANTS.TARGET_TYPES.WORK_INSTRUCTION, creationResult.docId || stepId, creationResult.action, creationResult.status, '', '', creationResult.message)
+      );
+      return summary;
+    }
+
+    summary.changed += 1;
+    summary.docWrites += 1;
+    summary.logEntries.push(
+      buildTargetLogEntry_(context, record, APP_CONSTANTS.TARGET_TYPES.WORK_INSTRUCTION, creationResult.docId || stepId, creationResult.action, creationResult.status, '', {
+        STEP_ID: stepId,
+        DOCUMENT_NAME: creationResult.documentName || ''
+      }, creationResult.message)
+    );
+
+    if ((creationResult.status === APP_CONSTANTS.STATUS.SUCCESS || creationResult.status === APP_CONSTANTS.STATUS.PREVIEW) && creationResult.docId) {
+      applyWorkInstructionDocId_(blankRecords, creationResult.docId, context, summary, record, 'ASSIGN_NEW_WI_DOC_ID', 'Created and assigned a new Work Instruction document for the step.');
+    }
+
+    return summary;
+  }
+
   function groupRecordsByWorkInstruction_(records, config) {
     var groups = {};
     records.forEach(function(record) {
@@ -340,6 +421,49 @@ var SyncService = (function() {
 
   function resolveWorkInstructionDocId_(recordValues, config) {
     return SyncUtils.asString(recordValues.WI_DOC_ID) || config.DEFAULT_WI_DOC_ID;
+  }
+
+  function applyWorkInstructionDocId_(records, docId, context, summary, sourceRecord, action, message) {
+    if (!records.length || !docId) {
+      return;
+    }
+
+    records.forEach(function(record) {
+      record.values.WI_DOC_ID = docId;
+      if (!context.dryRun) {
+        SheetsService.updateRecordByRow(context.config.PFMEA_SHEET, context.config.PFMEA_HEADER_ROW, record.rowNumber, {
+          WI_DOC_ID: docId
+        });
+      }
+    });
+
+    summary.changed += 1;
+    summary.logEntries.push(
+      buildTargetLogEntry_(
+        context,
+        sourceRecord,
+        APP_CONSTANTS.TARGET_TYPES.WORK_INSTRUCTION,
+        docId,
+        action,
+        context.dryRun ? APP_CONSTANTS.STATUS.PREVIEW : APP_CONSTANTS.STATUS.SUCCESS,
+        '',
+        {
+          STEP_ID: sourceRecord.values.STEP_ID,
+          WI_DOC_ID: docId,
+          PFMEA_ROWS: records.map(function(record) {
+            return record.rowNumber;
+          }).join(', ')
+        },
+        message
+      )
+    );
+  }
+
+  function chooseSeedRecordForStep_(records) {
+    var activeRecords = records.filter(function(record) {
+      return isActiveRecord_(record.values);
+    });
+    return activeRecords.length ? activeRecords[0] : records[0];
   }
 
   function computeSheetChangeSet_(existingValues, payload, allowOverwrite) {

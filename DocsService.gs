@@ -10,7 +10,16 @@ var DocsService = (function() {
 
     var startMarker = APP_CONSTANTS.DOC_MARKERS.START_PREFIX + stepId + ']]';
     var endMarker = APP_CONSTANTS.DOC_MARKERS.END_PREFIX + stepId + ']]';
-    var document = DocumentApp.openById(docId);
+    var document;
+    try {
+      document = DocumentApp.openById(docId);
+    } catch (error) {
+      return {
+        status: APP_CONSTANTS.STATUS.ERROR,
+        action: 'DOC_OPEN_ERROR',
+        message: 'Unable to open Work Instruction document ' + docId + ': ' + error.message
+      };
+    }
     var body = document.getBody();
     var section = findSection_(body, startMarker, endMarker, stepId);
     var sectionModel = buildSectionModel_(payload, stepId);
@@ -99,6 +108,64 @@ var DocsService = (function() {
       afterSummary: newPlainText,
       message: 'Section updated in document ' + docId
     };
+  }
+
+  function ensureWorkInstructionDocument(stepId, recordValues, options) {
+    var explicitDocId = SyncUtils.asString(recordValues.WI_DOC_ID);
+    if (explicitDocId) {
+      if (isDocumentAccessible_(explicitDocId)) {
+        return {
+          status: APP_CONSTANTS.STATUS.SUCCESS,
+          action: 'USE_EXISTING_DOC',
+          docId: explicitDocId,
+          created: false,
+          message: 'Using existing Work Instruction document ' + explicitDocId
+        };
+      }
+      return {
+        status: APP_CONSTANTS.STATUS.ERROR,
+        action: 'INVALID_WI_DOC_ID',
+        docId: explicitDocId,
+        created: false,
+        message: 'WI_DOC_ID ' + explicitDocId + ' is set but not accessible for step ' + stepId
+      };
+    }
+
+    if (!options.createMissingDocument) {
+      return {
+        status: options.dryRun ? APP_CONSTANTS.STATUS.PREVIEW : APP_CONSTANTS.STATUS.SKIPPED,
+        action: 'USE_DEFAULT_DOC',
+        docId: SyncUtils.asString(options.defaultDocId),
+        created: false,
+        message: 'No WI_DOC_ID set for step ' + stepId + '; using default Work Instruction document.'
+      };
+    }
+
+    var documentName = buildWorkInstructionName_(stepId, recordValues);
+    if (options.dryRun) {
+      return {
+        status: APP_CONSTANTS.STATUS.PREVIEW,
+        action: 'CREATE_WI_DOC',
+        docId: 'PREVIEW-' + stepId,
+        created: true,
+        documentName: documentName,
+        message: 'A new Work Instruction document would be created: ' + documentName
+      };
+    }
+
+    var document = createWorkInstructionDocument_(documentName, recordValues, options);
+    return {
+      status: APP_CONSTANTS.STATUS.SUCCESS,
+      action: 'CREATE_WI_DOC',
+      docId: document.getId(),
+      created: true,
+      documentName: documentName,
+      message: 'Created Work Instruction document ' + documentName + ' (' + document.getId() + ')'
+    };
+  }
+
+  function isDocumentAccessible(documentId) {
+    return isDocumentAccessible_(documentId);
   }
 
   function findSection_(body, startMarker, endMarker, stepId) {
@@ -250,7 +317,80 @@ var DocsService = (function() {
     options.backupDocIds[docId] = copy.getId();
   }
 
+  function createWorkInstructionDocument_(documentName, recordValues, options) {
+    var document;
+    var usedTemplate = false;
+
+    if (options.templateDocId && isDocumentAccessible_(options.templateDocId)) {
+      var templateCopy = DriveApp.getFileById(options.templateDocId).makeCopy(documentName);
+      document = DocumentApp.openById(templateCopy.getId());
+      usedTemplate = true;
+    } else {
+      document = DocumentApp.create(documentName);
+    }
+
+    var file = DriveApp.getFileById(document.getId());
+    if (options.folderId) {
+      try {
+        file.moveTo(DriveApp.getFolderById(options.folderId));
+      } catch (ignored) {
+        // If move fails, keep the document where it was created.
+      }
+    }
+
+    initializeWorkInstructionDocument_(document, recordValues, usedTemplate);
+    document.saveAndClose();
+    return DocumentApp.openById(document.getId());
+  }
+
+  function initializeWorkInstructionDocument_(document, recordValues, usedTemplate) {
+    var body = document.getBody();
+    if (!usedTemplate || SyncUtils.isBlank(body.getText())) {
+      body.clear();
+      body.appendParagraph(document.getName()).setHeading(DocumentApp.ParagraphHeading.TITLE);
+      body.appendParagraph('System-managed Work Instruction generated from PFMEA.');
+      body.appendParagraph('Manual text outside [[STEP_START:STEP_ID]] and [[STEP_END:STEP_ID]] markers is preserved.');
+    }
+
+    if (!SyncUtils.isBlank(recordValues.STEP_ID)) {
+      body.appendParagraph('Step ID: ' + recordValues.STEP_ID);
+    }
+    if (!SyncUtils.isBlank(recordValues.OPERATION_NO)) {
+      body.appendParagraph('Operation No: ' + recordValues.OPERATION_NO);
+    }
+    if (!SyncUtils.isBlank(recordValues.PROCESS_STEP)) {
+      body.appendParagraph('Process Step: ' + recordValues.PROCESS_STEP);
+    }
+    body.appendParagraph('');
+  }
+
+  function buildWorkInstructionName_(stepId, recordValues) {
+    var segments = ['WI'];
+    if (!SyncUtils.isBlank(recordValues.OPERATION_NO)) {
+      segments.push(SyncUtils.asString(recordValues.OPERATION_NO));
+    }
+    if (!SyncUtils.isBlank(recordValues.PROCESS_STEP)) {
+      segments.push(SyncUtils.asString(recordValues.PROCESS_STEP));
+    }
+    segments.push(stepId);
+    return SyncUtils.sanitizeDriveName(segments.join(' - '), 'WI - ' + stepId);
+  }
+
+  function isDocumentAccessible_(documentId) {
+    if (!documentId) {
+      return false;
+    }
+    try {
+      DocumentApp.openById(documentId);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   return {
-    syncStepSection: syncStepSection
+    syncStepSection: syncStepSection,
+    ensureWorkInstructionDocument: ensureWorkInstructionDocument,
+    isDocumentAccessible: isDocumentAccessible
   };
 })();

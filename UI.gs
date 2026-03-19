@@ -2,7 +2,15 @@ var UIService = (function() {
   function buildMenu() {
     SpreadsheetApp.getUi()
       .createMenu(APP_CONSTANTS.PROJECT_NAME)
-      .addItem('Setup System', 'setupSystem')
+      .addItem('Setup Actual Sync', 'setupActualSync')
+      .addItem('Refresh Link Matrix', 'refreshActualLinks')
+      .addItem('Preview Actual Sync', 'previewActualSync')
+      .addItem('Run Actual Sync', 'runActualSync')
+      .addSeparator()
+      .addItem('Open Actual Config', 'openActualConfig')
+      .addItem('Open Actual Links', 'openActualLinks')
+      .addSeparator()
+      .addItem('Setup Generic MVP', 'setupSystem')
       .addItem('Run Full Sync', 'runFullSync')
       .addItem('Sync Selected PFMEA Row', 'syncSelectedPfmeaRow')
       .addItem('Preview Changes', 'previewChanges')
@@ -125,6 +133,78 @@ var UIService = (function() {
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
   }
 
+  function setupActualSyncAction() {
+    var result = ActualSyncService.setup();
+    var ui = SpreadsheetApp.getUi();
+    var message = [
+      'Actual sync helper sheets are ready.',
+      'PFMEA sheets scanned: ' + result.refresh.pfmeaSheets,
+      'PFMEA rows indexed: ' + result.refresh.pfmeaRows,
+      'KPLN blocks found: ' + result.refresh.kplnBlocks,
+      'SYNC_LINKS rows created: ' + result.refresh.linkRows,
+      'Next: open SYNC_LINKS and review suggested mappings.'
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+    return result;
+  }
+
+  function refreshActualLinksAction() {
+    var result = ActualSyncService.refreshLinks();
+    var ui = SpreadsheetApp.getUi();
+    var message = [
+      'Actual link matrix refreshed.',
+      'PFMEA sheets scanned: ' + result.pfmeaSheets,
+      'PFMEA rows indexed: ' + result.pfmeaRows,
+      'KPLN blocks found: ' + result.kplnBlocks,
+      'SYNC_LINKS rows created: ' + result.linkRows
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+    return result;
+  }
+
+  function previewActualSyncAction() {
+    var result = ActualSyncService.previewSync();
+    showActualSummary_(result, 'Actual sync preview completed.');
+    return result;
+  }
+
+  function runActualSyncAction() {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      APP_CONSTANTS.PROJECT_NAME,
+      'Run actual sync against APPROVED rows in SYNC_LINKS?',
+      ui.ButtonSet.YES_NO
+    );
+    if (response !== ui.Button.YES) {
+      return null;
+    }
+    var result = ActualSyncService.runSync();
+    showActualSummary_(result, 'Actual sync completed.');
+    return result;
+  }
+
+  function openActualConfigAction() {
+    ActualSyncService.openConfig();
+  }
+
+  function openActualLinksAction() {
+    ActualSyncService.openLinks();
+  }
+
+  function showActualSummary_(result, intro) {
+    var ui = SpreadsheetApp.getUi();
+    var message = [
+      intro,
+      'Links processed: ' + result.processed,
+      'Changed actions: ' + result.changed,
+      'Skipped actions: ' + result.skipped,
+      'Errors: ' + result.errors,
+      'KPLN writes: ' + result.kplnWrites,
+      'WI writes: ' + result.wiWrites
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+  }
+
   return {
     buildMenu: buildMenu,
     setupSystemAction: setupSystemAction,
@@ -133,6 +213,12 @@ var UIService = (function() {
     previewChangesAction: previewChangesAction,
     validateMappingAction: validateMappingAction,
     openConfigAction: openConfigAction,
-    installTriggerAction: installTriggerAction
+    installTriggerAction: installTriggerAction,
+    setupActualSyncAction: setupActualSyncAction,
+    refreshActualLinksAction: refreshActualLinksAction,
+    previewActualSyncAction: previewActualSyncAction,
+    runActualSyncAction: runActualSyncAction,
+    openActualConfigAction: openActualConfigAction,
+    openActualLinksAction: openActualLinksAction
   };
 })();
