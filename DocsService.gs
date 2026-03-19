@@ -372,11 +372,20 @@ var DocsService = (function() {
   }
 
   function relocateManagedSection_(body, section, placement, startMarker, endMarker, sectionModel) {
-    for (var removeIndex = section.inclusiveEndIndex; removeIndex >= section.startIndex; removeIndex -= 1) {
+    var insertedLength = sectionModel.length + 2;
+    var insertIndex = placement.insertIndex;
+    insertManagedSection_(body, insertIndex, startMarker, endMarker, sectionModel);
+
+    var removeStart = section.startIndex;
+    var removeEnd = section.inclusiveEndIndex;
+    if (insertIndex <= section.startIndex) {
+      removeStart += insertedLength;
+      removeEnd += insertedLength;
+    }
+
+    for (var removeIndex = removeEnd; removeIndex >= removeStart; removeIndex -= 1) {
       body.removeChild(body.getChild(removeIndex));
     }
-    var refreshedPlacement = resolvePlacement_(body, placement.options || {});
-    insertManagedSection_(body, refreshedPlacement.insertIndex, startMarker, endMarker, sectionModel);
   }
 
   function shouldRelocateSection_(section, placement) {
