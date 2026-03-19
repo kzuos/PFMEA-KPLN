@@ -24,6 +24,7 @@ var DocsService = (function() {
     var section = findSection_(body, startMarker, endMarker, stepId);
     var sectionModel = buildSectionModel_(payload, stepId);
     var newPlainText = buildPlainText_(sectionModel);
+    var placement = resolvePlacement_(body, options);
 
     if (!section.found) {
       if (!options.createMissingSection) {
@@ -42,19 +43,19 @@ var DocsService = (function() {
           action: 'CREATE_SECTION',
           beforeSummary: '',
           afterSummary: newPlainText,
-          message: 'Section would be appended to document ' + docId
+          message: 'Section would be inserted ' + placement.messageSuffix + ' in document ' + docId
         };
       }
 
       backupDocumentIfNeeded_(docId, options);
-      appendSection_(body, startMarker, endMarker, sectionModel);
+      insertManagedSection_(body, placement.insertIndex, startMarker, endMarker, sectionModel);
       document.saveAndClose();
       return {
         status: APP_CONSTANTS.STATUS.SUCCESS,
         action: 'CREATE_SECTION',
         beforeSummary: '',
         afterSummary: newPlainText,
-        message: 'Section created in document ' + docId
+        message: 'Section created ' + placement.messageSuffix + ' in document ' + docId
       };
     }
 
@@ -79,6 +80,29 @@ var DocsService = (function() {
     }
 
     if (section.currentText === newPlainText) {
+      if (options.relocateManagedSection && shouldRelocateSection_(section, placement)) {
+        if (options.dryRun) {
+          return {
+            status: APP_CONSTANTS.STATUS.PREVIEW,
+            action: 'RELOCATE_SECTION',
+            beforeSummary: section.currentText,
+            afterSummary: newPlainText,
+            message: 'Section would be moved ' + placement.messageSuffix + ' in document ' + docId
+          };
+        }
+
+        backupDocumentIfNeeded_(docId, options);
+        relocateManagedSection_(body, section, placement, startMarker, endMarker, sectionModel);
+        document.saveAndClose();
+        return {
+          status: APP_CONSTANTS.STATUS.SUCCESS,
+          action: 'RELOCATE_SECTION',
+          beforeSummary: section.currentText,
+          afterSummary: newPlainText,
+          message: 'Section moved ' + placement.messageSuffix + ' in document ' + docId
+        };
+      }
+
       return {
         status: options.dryRun ? APP_CONSTANTS.STATUS.PREVIEW : APP_CONSTANTS.STATUS.SKIPPED,
         action: 'NO_DOC_CHANGE',
@@ -89,6 +113,16 @@ var DocsService = (function() {
     }
 
     if (options.dryRun) {
+      if (options.relocateManagedSection && shouldRelocateSection_(section, placement)) {
+        return {
+          status: APP_CONSTANTS.STATUS.PREVIEW,
+          action: 'RELOCATE_SECTION',
+          beforeSummary: section.currentText,
+          afterSummary: newPlainText,
+          message: 'Section would be moved and updated ' + placement.messageSuffix + ' in document ' + docId
+        };
+      }
+
       return {
         status: APP_CONSTANTS.STATUS.PREVIEW,
         action: 'UPDATE_SECTION',
@@ -99,14 +133,18 @@ var DocsService = (function() {
     }
 
     backupDocumentIfNeeded_(docId, options);
-    replaceSectionContent_(body, section.startIndex, section.endIndex, sectionModel);
+    if (options.relocateManagedSection && shouldRelocateSection_(section, placement)) {
+      relocateManagedSection_(body, section, placement, startMarker, endMarker, sectionModel);
+    } else {
+      replaceSectionContent_(body, section.startIndex, section.endIndex, sectionModel);
+    }
     document.saveAndClose();
     return {
       status: APP_CONSTANTS.STATUS.SUCCESS,
-      action: 'UPDATE_SECTION',
+      action: options.relocateManagedSection && shouldRelocateSection_(section, placement) ? 'RELOCATE_SECTION' : 'UPDATE_SECTION',
       beforeSummary: section.currentText,
       afterSummary: newPlainText,
-      message: 'Section updated in document ' + docId
+      message: (options.relocateManagedSection && shouldRelocateSection_(section, placement) ? 'Section moved and updated ' + placement.messageSuffix : 'Section updated') + ' in document ' + docId
     };
   }
 
@@ -178,7 +216,8 @@ var DocsService = (function() {
       startIndex: -1,
       endIndex: -1,
       currentText: '',
-      locked: false
+      locked: false,
+      inclusiveEndIndex: -1
     };
     var lockMarker = APP_CONSTANTS.DOC_MARKERS.LOCK_PREFIX + stepId + ']]';
 
@@ -190,6 +229,7 @@ var DocsService = (function() {
         result.startIndex = index;
       } else if (text === endMarker && result.startIndex > -1) {
         result.endIndex = index;
+        result.inclusiveEndIndex = index;
         break;
       }
     }
@@ -229,7 +269,12 @@ var DocsService = (function() {
 
   function buildSectionModel_(payload, stepId) {
     var lines = [];
-    lines.push({type: 'heading', text: payload.STEP_TITLE || stepId});
+    if (!SyncUtils.isBlank(payload.MANAGED_SECTION_TITLE)) {
+      lines.push({type: 'heading', text: payload.MANAGED_SECTION_TITLE});
+      lines.push({type: 'subheading', text: payload.STEP_TITLE || stepId});
+    } else {
+      lines.push({type: 'heading', text: payload.STEP_TITLE || stepId});
+    }
     lines.push({type: 'paragraph', text: 'Step ID: ' + stepId});
     if (!SyncUtils.isBlank(payload.OPERATION_NO)) {
       lines.push({type: 'paragraph', text: 'Operation No: ' + payload.OPERATION_NO});
@@ -276,15 +321,26 @@ var DocsService = (function() {
     }).join('\n');
   }
 
-  function appendSection_(body, startMarker, endMarker, sectionModel) {
-    body.appendParagraph(startMarker);
+  function insertManagedSection_(body, insertIndex, startMarker, endMarker, sectionModel) {
+    if (insertIndex >= body.getNumChildren()) {
+      body.appendParagraph(startMarker);
+      sectionModel.forEach(function(item) {
+        var paragraph = body.appendParagraph(item.text);
+        applySectionFormatting_(paragraph, item);
+      });
+      body.appendParagraph(endMarker);
+      return;
+    }
+
+    var currentIndex = insertIndex;
+    body.insertParagraph(currentIndex, startMarker);
+    currentIndex += 1;
     sectionModel.forEach(function(item) {
-      var paragraph = body.appendParagraph(item.text);
-      if (item.type === 'heading') {
-        paragraph.setHeading(DocumentApp.ParagraphHeading.HEADING2);
-      }
+      var paragraph = body.insertParagraph(currentIndex, item.text);
+      applySectionFormatting_(paragraph, item);
+      currentIndex += 1;
     });
-    body.appendParagraph(endMarker);
+    body.insertParagraph(currentIndex, endMarker);
   }
 
   function replaceSectionContent_(body, startIndex, endIndex, sectionModel) {
@@ -298,11 +354,145 @@ var DocsService = (function() {
     var currentIndex = insertIndex;
     sectionModel.forEach(function(item) {
       var paragraph = body.insertParagraph(currentIndex, item.text);
-      if (item.type === 'heading') {
-        paragraph.setHeading(DocumentApp.ParagraphHeading.HEADING2);
-      }
+      applySectionFormatting_(paragraph, item);
       currentIndex += 1;
     });
+  }
+
+  function applySectionFormatting_(paragraph, item) {
+    if (item.type === 'heading') {
+      paragraph.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      return;
+    }
+    if (item.type === 'subheading') {
+      paragraph.setHeading(DocumentApp.ParagraphHeading.HEADING3);
+      return;
+    }
+    paragraph.setHeading(DocumentApp.ParagraphHeading.NORMAL);
+  }
+
+  function relocateManagedSection_(body, section, placement, startMarker, endMarker, sectionModel) {
+    for (var removeIndex = section.inclusiveEndIndex; removeIndex >= section.startIndex; removeIndex -= 1) {
+      body.removeChild(body.getChild(removeIndex));
+    }
+    var refreshedPlacement = resolvePlacement_(body, placement.options || {});
+    insertManagedSection_(body, refreshedPlacement.insertIndex, startMarker, endMarker, sectionModel);
+  }
+
+  function shouldRelocateSection_(section, placement) {
+    if (!placement || !placement.isAnchored) {
+      return false;
+    }
+    if (section.startIndex < placement.sectionStartIndex) {
+      return true;
+    }
+    return section.inclusiveEndIndex > placement.sectionEndIndex;
+  }
+
+  function resolvePlacement_(body, options) {
+    var normalizedOptions = options || {};
+    var placement = {
+      insertIndex: body.getNumChildren(),
+      sectionStartIndex: 0,
+      sectionEndIndex: Math.max(body.getNumChildren() - 1, 0),
+      anchorText: '',
+      isAnchored: false,
+      messageSuffix: 'at the end',
+      options: normalizedOptions
+    };
+
+    var anchorPatterns = normalizedOptions.anchorPatterns || [];
+    if (!anchorPatterns.length) {
+      return placement;
+    }
+
+    var anchorIndex = findAnchorIndex_(body, anchorPatterns, normalizedOptions.anchorMatch || 'first');
+    if (anchorIndex === -1) {
+      return placement;
+    }
+
+    var boundaryIndex = findSectionBoundaryIndex_(body, anchorIndex + 1, normalizedOptions.nextSectionPatterns || []);
+    placement.insertIndex = boundaryIndex;
+    placement.sectionStartIndex = anchorIndex;
+    placement.sectionEndIndex = Math.max(boundaryIndex - 1, anchorIndex);
+    placement.anchorText = getElementText_(body.getChild(anchorIndex));
+    placement.isAnchored = true;
+    placement.messageSuffix = 'under "' + placement.anchorText + '"';
+    return placement;
+  }
+
+  function findAnchorIndex_(body, anchorPatterns, anchorMatch) {
+    var matches = [];
+    for (var index = 0; index < body.getNumChildren(); index += 1) {
+      var element = body.getChild(index);
+      var normalized = normalizeMarkerText_(getElementText_(element));
+      if (!normalized) {
+        continue;
+      }
+      if (anchorPatterns.some(function(pattern) {
+        return normalized.indexOf(normalizeMarkerText_(pattern)) > -1;
+      }) && isHeadingLikeElement_(element, normalized)) {
+        matches.push(index);
+      }
+    }
+    if (!matches.length) {
+      return -1;
+    }
+    return anchorMatch === 'last' ? matches[matches.length - 1] : matches[0];
+  }
+
+  function findSectionBoundaryIndex_(body, startIndex, nextSectionPatterns) {
+    for (var index = startIndex; index < body.getNumChildren(); index += 1) {
+      var element = body.getChild(index);
+      var text = getElementText_(element);
+      var normalized = normalizeMarkerText_(text);
+      if (!normalized) {
+        continue;
+      }
+      if (matchesSectionBoundary_(element, normalized, nextSectionPatterns)) {
+        return index;
+      }
+    }
+    return body.getNumChildren();
+  }
+
+  function matchesSectionBoundary_(element, normalizedText, nextSectionPatterns) {
+    if (nextSectionPatterns.some(function(pattern) {
+      return normalizedText.indexOf(normalizeMarkerText_(pattern)) > -1;
+    })) {
+      return true;
+    }
+    return isHeadingLikeElement_(element, normalizedText) && /^\d+\s/.test(normalizedText);
+  }
+
+  function isHeadingLikeElement_(element, normalizedText) {
+    var type = element.getType();
+    if (type === DocumentApp.ElementType.PARAGRAPH) {
+      var heading = element.asParagraph().getHeading();
+      if (heading && heading !== DocumentApp.ParagraphHeading.NORMAL) {
+        return true;
+      }
+    }
+
+    if (normalizedText.length <= 80 && /^\d+\s+[A-Z]/.test(normalizedText)) {
+      return true;
+    }
+
+    return normalizedText.length <= 60 && normalizedText === normalizedText.toUpperCase();
+  }
+
+  function normalizeMarkerText_(value) {
+    return SyncUtils.asString(value)
+      .toUpperCase()
+      .replace(/[Ç]/g, 'C')
+      .replace(/[Ğ]/g, 'G')
+      .replace(/[İI]/g, 'I')
+      .replace(/[Ö]/g, 'O')
+      .replace(/[Ş]/g, 'S')
+      .replace(/[Ü]/g, 'U')
+      .replace(/[^A-Z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   function backupDocumentIfNeeded_(docId, options) {

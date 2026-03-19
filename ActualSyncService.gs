@@ -326,6 +326,7 @@ var ActualSyncService = (function() {
     }
 
     var payloadForDoc = {
+      MANAGED_SECTION_TITLE: getManagedSectionTitle_(templateResolution.templateKey || link.WI_TEMPLATE_KEY),
       STEP_TITLE: payload.stepTitle || link.KPLN_STEP_TITLE,
       OPERATION_NO: link.KPLN_PROCESS_NO,
       PROCESS_DESCRIPTION: payload.processDescription,
@@ -342,13 +343,18 @@ var ActualSyncService = (function() {
       SECTION_STATUS: APP_CONSTANTS.STATUS.ACTIVE,
       LAST_SYNC_AT: SyncUtils.nowIso()
     };
+    var sectionSyncOptions = getWorkInstructionSectionOptions_(templateResolution.templateKey || link.WI_TEMPLATE_KEY);
     var docSync = DocsService.syncStepSection(link.WI_DOC_ID, link.LINK_KEY, payloadForDoc, {
       dryRun: dryRun,
       allowOverwrite: true,
       createMissingSection: true,
       backupBeforeWrite: false,
       backupFolderId: '',
-      backupDocIds: {}
+      backupDocIds: {},
+      relocateManagedSection: true,
+      anchorPatterns: sectionSyncOptions.anchorPatterns,
+      anchorMatch: sectionSyncOptions.anchorMatch,
+      nextSectionPatterns: sectionSyncOptions.nextSectionPatterns
     });
 
     if (docSync.status === APP_CONSTANTS.STATUS.ERROR) {
@@ -1246,6 +1252,57 @@ var ActualSyncService = (function() {
       return 'FOUNDRY_PROCESS_CONTROL';
     }
     return 'GENERIC_MANAGED';
+  }
+
+  function getManagedSectionTitle_(templateKey) {
+    switch (templateKey) {
+      case 'FINAL_CONTROL':
+        return 'PFMEA / KPLN Final Kontrol Ozet';
+      case 'PACKAGING':
+        return 'PFMEA / KPLN Paketleme Ozet';
+      case 'MILLING':
+        return 'PFMEA / KPLN Freze Operasyon Ozet';
+      case 'TRIMMING':
+        return 'PFMEA / KPLN Trimleme Ozet';
+      case 'CAST_CONTROL':
+        return 'PFMEA / KPLN Dokum Kalite Ozet';
+      case 'FOUNDRY_PROCESS_CONTROL':
+        return 'PFMEA / KPLN Proses Kontrol Ozet';
+      default:
+        return 'PFMEA / KPLN Sync Ozet';
+    }
+  }
+
+  function getWorkInstructionSectionOptions_(templateKey) {
+    switch (templateKey) {
+      case 'PACKAGING':
+        return {
+          anchorPatterns: ['UYGULAMA'],
+          anchorMatch: 'last',
+          nextSectionPatterns: ['ILGILI DOKUMANLAR', 'REVIZYON GECMISI']
+        };
+      case 'FINAL_CONTROL':
+      case 'MILLING':
+      case 'TRIMMING':
+      case 'CAST_CONTROL':
+        return {
+          anchorPatterns: ['UYGULAMA'],
+          anchorMatch: 'first',
+          nextSectionPatterns: ['ILGILI DOKUMANLAR', 'REVIZYON GECMISI']
+        };
+      case 'FOUNDRY_PROCESS_CONTROL':
+        return {
+          anchorPatterns: ['OLASI HATALARA KARSI GORSEL KONTROLLER', 'KONTROL NOKTALARI'],
+          anchorMatch: 'last',
+          nextSectionPatterns: ['REVIZYON GECMISI', 'ACIKLAMA']
+        };
+      default:
+        return {
+          anchorPatterns: [],
+          anchorMatch: 'first',
+          nextSectionPatterns: []
+        };
+    }
   }
 
   function containsAny_(value, candidates) {
