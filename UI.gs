@@ -4,11 +4,13 @@ var UIService = (function() {
       .createMenu(APP_CONSTANTS.PROJECT_NAME)
       .addItem('Setup Actual Sync', 'setupActualSync')
       .addItem('Refresh Link Matrix', 'refreshActualLinks')
+      .addItem('Refresh WI Templates', 'refreshActualTemplates')
       .addItem('Preview Actual Sync', 'previewActualSync')
       .addItem('Run Actual Sync', 'runActualSync')
       .addSeparator()
       .addItem('Open Actual Config', 'openActualConfig')
       .addItem('Open Actual Links', 'openActualLinks')
+      .addItem('Open WI Templates', 'openActualTemplates')
       .addSeparator()
       .addItem('Setup Generic MVP', 'setupSystem')
       .addItem('Run Full Sync', 'runFullSync')
@@ -138,11 +140,12 @@ var UIService = (function() {
     var ui = SpreadsheetApp.getUi();
     var message = [
       'Actual sync helper sheets are ready.',
+      'WI templates indexed: ' + result.templates.length,
       'PFMEA sheets scanned: ' + result.refresh.pfmeaSheets,
       'PFMEA rows indexed: ' + result.refresh.pfmeaRows,
       'KPLN blocks found: ' + result.refresh.kplnBlocks,
       'SYNC_LINKS rows created: ' + result.refresh.linkRows,
-      'Next: open SYNC_LINKS and review suggested mappings.'
+      'Next: review WI_TEMPLATES, then open SYNC_LINKS and approve mappings.'
     ].join('\n');
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
     return result;
@@ -168,6 +171,16 @@ var UIService = (function() {
     return result;
   }
 
+  function refreshActualTemplatesAction() {
+    var result = ActualSyncService.refreshTemplates();
+    SpreadsheetApp.getUi().alert(
+      APP_CONSTANTS.PROJECT_NAME,
+      'WI templates refreshed.\nTemplate rows: ' + result.templateRows,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return result;
+  }
+
   function runActualSyncAction() {
     var ui = SpreadsheetApp.getUi();
     var response = ui.alert(
@@ -189,6 +202,10 @@ var UIService = (function() {
 
   function openActualLinksAction() {
     ActualSyncService.openLinks();
+  }
+
+  function openActualTemplatesAction() {
+    ActualSyncService.openTemplates();
   }
 
   function showActualSummary_(result, intro) {
@@ -216,9 +233,11 @@ var UIService = (function() {
     installTriggerAction: installTriggerAction,
     setupActualSyncAction: setupActualSyncAction,
     refreshActualLinksAction: refreshActualLinksAction,
+    refreshActualTemplatesAction: refreshActualTemplatesAction,
     previewActualSyncAction: previewActualSyncAction,
     runActualSyncAction: runActualSyncAction,
     openActualConfigAction: openActualConfigAction,
-    openActualLinksAction: openActualLinksAction
+    openActualLinksAction: openActualLinksAction,
+    openActualTemplatesAction: openActualTemplatesAction
   };
 })();

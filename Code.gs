@@ -18,6 +18,10 @@ function refreshActualLinks() {
   return UIService.refreshActualLinksAction();
 }
 
+function refreshActualTemplates() {
+  return UIService.refreshActualTemplatesAction();
+}
+
 function previewActualSync() {
   return UIService.previewActualSyncAction();
 }
@@ -32,6 +36,10 @@ function openActualConfig() {
 
 function openActualLinks() {
   return UIService.openActualLinksAction();
+}
+
+function openActualTemplates() {
+  return UIService.openActualTemplatesAction();
 }
 
 function runFullSync() {

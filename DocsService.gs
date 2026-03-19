@@ -168,6 +168,10 @@ var DocsService = (function() {
     return isDocumentAccessible_(documentId);
   }
 
+  function ensureGoogleDocTemplate(sourceFileId, templateName, folderId) {
+    return ensureGoogleDocTemplate_(sourceFileId, templateName, folderId);
+  }
+
   function findSection_(body, startMarker, endMarker, stepId) {
     var result = {
       found: false,
@@ -325,6 +329,11 @@ var DocsService = (function() {
       var templateCopy = DriveApp.getFileById(options.templateDocId).makeCopy(documentName);
       document = DocumentApp.openById(templateCopy.getId());
       usedTemplate = true;
+    } else if (options.templateSourceFileId) {
+      var importedTemplate = ensureGoogleDocTemplate_(options.templateSourceFileId, options.templateName, options.folderId);
+      var importedTemplateCopy = DriveApp.getFileById(importedTemplate.docId).makeCopy(documentName);
+      document = DocumentApp.openById(importedTemplateCopy.getId());
+      usedTemplate = true;
     } else {
       document = DocumentApp.create(documentName);
     }
@@ -345,23 +354,30 @@ var DocsService = (function() {
 
   function initializeWorkInstructionDocument_(document, recordValues, usedTemplate) {
     var body = document.getBody();
-    if (!usedTemplate || SyncUtils.isBlank(body.getText())) {
+    var templateHasContent = !SyncUtils.isBlank(body.getText());
+    replacePlaceholders_(body, {
+      DOC_TITLE: document.getName(),
+      STEP_ID: recordValues.STEP_ID,
+      OPERATION_NO: recordValues.OPERATION_NO,
+      PROCESS_STEP: recordValues.PROCESS_STEP
+    });
+
+    if (!usedTemplate || !templateHasContent) {
       body.clear();
       body.appendParagraph(document.getName()).setHeading(DocumentApp.ParagraphHeading.TITLE);
       body.appendParagraph('System-managed Work Instruction generated from PFMEA.');
       body.appendParagraph('Manual text outside [[STEP_START:STEP_ID]] and [[STEP_END:STEP_ID]] markers is preserved.');
+      if (!SyncUtils.isBlank(recordValues.STEP_ID)) {
+        body.appendParagraph('Step ID: ' + recordValues.STEP_ID);
+      }
+      if (!SyncUtils.isBlank(recordValues.OPERATION_NO)) {
+        body.appendParagraph('Operation No: ' + recordValues.OPERATION_NO);
+      }
+      if (!SyncUtils.isBlank(recordValues.PROCESS_STEP)) {
+        body.appendParagraph('Process Step: ' + recordValues.PROCESS_STEP);
+      }
+      body.appendParagraph('');
     }
-
-    if (!SyncUtils.isBlank(recordValues.STEP_ID)) {
-      body.appendParagraph('Step ID: ' + recordValues.STEP_ID);
-    }
-    if (!SyncUtils.isBlank(recordValues.OPERATION_NO)) {
-      body.appendParagraph('Operation No: ' + recordValues.OPERATION_NO);
-    }
-    if (!SyncUtils.isBlank(recordValues.PROCESS_STEP)) {
-      body.appendParagraph('Process Step: ' + recordValues.PROCESS_STEP);
-    }
-    body.appendParagraph('');
   }
 
   function buildWorkInstructionName_(stepId, recordValues) {
@@ -388,9 +404,55 @@ var DocsService = (function() {
     }
   }
 
+  function ensureGoogleDocTemplate_(sourceFileId, templateName, folderId) {
+    if (!sourceFileId) {
+      throw new Error('No source template file ID was provided.');
+    }
+
+    var sourceFile = DriveApp.getFileById(sourceFileId);
+    var mimeType = sourceFile.getMimeType();
+    if (mimeType === MimeType.GOOGLE_DOCS || mimeType === 'application/vnd.google-apps.document') {
+      return {
+        docId: sourceFileId,
+        name: sourceFile.getName(),
+        imported: false
+      };
+    }
+
+    var metadata = {
+      name: SyncUtils.sanitizeDriveName(templateName || ('Template - ' + sourceFile.getName()), 'WI Template'),
+      mimeType: 'application/vnd.google-apps.document'
+    };
+    if (folderId) {
+      metadata.parents = [folderId];
+    }
+
+    var converted = Drive.Files.create(metadata, sourceFile.getBlob(), {
+      fields: 'id,name,mimeType'
+    });
+
+    return {
+      docId: converted.id,
+      name: converted.name || metadata.name,
+      imported: true
+    };
+  }
+
+  function replacePlaceholders_(body, replacements) {
+    Object.keys(replacements || {}).forEach(function(key) {
+      var value = SyncUtils.asString(replacements[key]);
+      body.replaceText('\\[\\[' + escapeRegex_(key) + '\\]\\]', value);
+    });
+  }
+
+  function escapeRegex_(value) {
+    return SyncUtils.asString(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   return {
     syncStepSection: syncStepSection,
     ensureWorkInstructionDocument: ensureWorkInstructionDocument,
+    ensureGoogleDocTemplate: ensureGoogleDocTemplate,
     isDocumentAccessible: isDocumentAccessible
   };
 })();
