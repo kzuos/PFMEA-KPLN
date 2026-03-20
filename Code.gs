@@ -106,6 +106,12 @@ function remoteDebugActualSelection() {
   });
 }
 
+function remoteDebugKplnBlock() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.debugKplnBlock('LINK-10.1');
+  });
+}
+
 function runFullSync() {
   return UIService.runFullSyncAction(false);
 }
@@ -170,6 +176,10 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.debugPfmeaWorkbookSummary();
     });
+  } else if (action === 'debugKpln') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugKplnBlock(request.linkKey || 'LINK-10.1');
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -193,7 +203,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, refreshTemplates, validate, preview, run, or generateClean.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, debugKpln, refreshTemplates, validate, preview, run, or generateClean.'
     };
   }
 

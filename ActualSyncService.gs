@@ -989,6 +989,45 @@ var ActualSyncService = (function() {
     });
   }
 
+  function debugKplnBlock(linkKey) {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var links = loadAllLinkRows_();
+    var link = null;
+    for (var index = 0; index < links.length; index += 1) {
+      if (SyncUtils.asString(links[index].LINK_KEY) === SyncUtils.asString(linkKey)) {
+        link = links[index];
+        break;
+      }
+    }
+    if (!link) {
+      throw new Error('Link not found: ' + linkKey);
+    }
+
+    var sheet = getSheet_(config.KPLN_SHEET_NAME);
+    var rowStart = toNumber_(link.KPLN_ROW_START);
+    var rowEnd = toNumber_(link.KPLN_ROW_END) || rowStart;
+    var rowCount = Math.max(rowEnd - rowStart + 1, 1);
+    var values = sheet.getRange(rowStart, 1, rowCount, 15).getDisplayValues();
+
+    return {
+      linkKey: link.LINK_KEY,
+      kplnSheetName: config.KPLN_SHEET_NAME,
+      rowStart: rowStart,
+      rowEnd: rowEnd,
+      rows: values.map(function(row, rowOffset) {
+        return {
+          rowNumber: rowStart + rowOffset,
+          values: row
+        };
+      })
+    };
+  }
+
   function buildMappedHeaderDebug_(headers, indexMap) {
     var debug = {};
     Object.keys(indexMap).forEach(function(key) {
@@ -2626,6 +2665,7 @@ var ActualSyncService = (function() {
     debugLinkSelection: debugLinkSelection,
     debugPfmeaSheet: debugPfmeaSheet,
     debugPfmeaWorkbookSummary: debugPfmeaWorkbookSummary,
+    debugKplnBlock: debugKplnBlock,
     openConfig: openConfig,
     openLinks: openLinks,
     openTemplates: openTemplates
