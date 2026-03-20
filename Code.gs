@@ -2,6 +2,14 @@ function onOpen(e) {
   UIService.buildMenu();
 }
 
+function doGet(e) {
+  return handleRemoteWebRequest_(e);
+}
+
+function doPost(e) {
+  return handleRemoteWebRequest_(e);
+}
+
 function onEdit(e) {
   return SyncService.handleSimpleEdit(e);
 }
@@ -119,4 +127,59 @@ function runRemoteActualAction_(action) {
       error: error && error.message ? error.message : String(error)
     };
   }
+}
+
+function handleRemoteWebRequest_(e) {
+  var request = parseRemoteWebRequest_(e);
+  var action = request.action;
+  var result;
+
+  if (action === 'refresh') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.refreshLinks();
+    });
+  } else if (action === 'refreshTemplates') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.refreshTemplates();
+    });
+  } else if (action === 'validate') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.validateSetup();
+    });
+  } else if (action === 'preview') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.previewSync();
+    });
+  } else {
+    result = {
+      ok: false,
+      error: 'Unsupported action. Use refresh, refreshTemplates, validate, or preview.'
+    };
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      ok: !result || result.ok !== false,
+      action: action || '',
+      result: result
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function parseRemoteWebRequest_(e) {
+  var request = {};
+  if (e && e.parameter) {
+    request.action = e.parameter.action || '';
+  }
+  if (e && e.postData && e.postData.contents) {
+    try {
+      var body = JSON.parse(e.postData.contents);
+      if (body && body.action) {
+        request.action = body.action;
+      }
+    } catch (ignored) {
+      // Fall back to query parameters.
+    }
+  }
+  return request;
 }
