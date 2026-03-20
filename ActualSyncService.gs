@@ -1437,13 +1437,18 @@ var ActualSyncService = (function() {
       return result;
     }
 
-    if (pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.ERROR_ROW_COUNT) {
+    if (!result.usesFilter && pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.ERROR_ROW_COUNT) {
       result.error = 'Approved link ' + linkLabel + ' currently matches ' + pfmeaRows.length + ' PFMEA rows on sheet ' + sheetLabel + '. Narrow PFMEA_STEP_FILTER before preview or sync.';
       return result;
     }
 
     if (!result.usesFilter && (pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.WARNING_ROW_COUNT || distinctSteps > 1 || distinctProcesses > 1)) {
       result.warning = 'Approved link ' + linkLabel + ' uses a blank PFMEA_STEP_FILTER and currently matches ' + pfmeaRows.length + ' PFMEA rows on sheet ' + sheetLabel + '. Add a step filter before live sync.';
+      return result;
+    }
+
+    if (result.usesFilter && pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.ERROR_ROW_COUNT) {
+      result.warning = 'Approved link ' + linkLabel + ' matches ' + pfmeaRows.length + ' PFMEA rows on sheet ' + sheetLabel + ' even with PFMEA_STEP_FILTER set. Review the mapping, but preview can continue.';
       return result;
     }
 
