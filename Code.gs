@@ -46,6 +46,42 @@ function openActualTemplates() {
   return UIService.openActualTemplatesAction();
 }
 
+function remoteSetupActualSync() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.setup();
+  });
+}
+
+function remoteRefreshActualLinks() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.refreshLinks();
+  });
+}
+
+function remoteRefreshActualTemplates() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.refreshTemplates();
+  });
+}
+
+function remoteValidateActualSync() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.validateSetup();
+  });
+}
+
+function remotePreviewActualSync() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.previewSync();
+  });
+}
+
+function remoteRunActualSync() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.runSync();
+  });
+}
+
 function runFullSync() {
   return UIService.runFullSyncAction(false);
 }
@@ -72,4 +108,15 @@ function installPfmeaSyncTrigger() {
 
 function handleSpreadsheetEdit(e) {
   return SyncService.handleEditTrigger(e);
+}
+
+function runRemoteActualAction_(action) {
+  try {
+    return action();
+  } catch (error) {
+    return {
+      ok: false,
+      error: error && error.message ? error.message : String(error)
+    };
+  }
 }
