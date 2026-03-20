@@ -136,49 +136,69 @@ var UIService = (function() {
   }
 
   function setupActualSyncAction() {
-    var result = ActualSyncService.setup();
-    var ui = SpreadsheetApp.getUi();
-    var message = [
-      'Actual sync helper sheets are ready.',
-      'WI templates indexed: ' + result.templates.length,
-      'PFMEA sheets scanned: ' + result.refresh.pfmeaSheets,
-      'PFMEA rows indexed: ' + result.refresh.pfmeaRows,
-      'KPLN blocks found: ' + result.refresh.kplnBlocks,
-      'SYNC_LINKS rows created: ' + result.refresh.linkRows,
-      'Next: review WI_TEMPLATES, then open SYNC_LINKS and approve mappings.'
-    ].join('\n');
-    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
-    return result;
+    return runActualAction_(function() {
+      var result = ActualSyncService.setup();
+      var ui = SpreadsheetApp.getUi();
+      var validation = result.validation || {ok: true, errors: [], warnings: []};
+      var message = [
+        'Actual sync helper sheets are ready.',
+        'WI templates indexed: ' + result.templates.length,
+        'PFMEA sheets scanned: ' + result.refresh.pfmeaSheets,
+        'PFMEA rows indexed: ' + result.refresh.pfmeaRows,
+        'KPLN blocks found: ' + result.refresh.kplnBlocks,
+        'SYNC_LINKS rows created: ' + result.refresh.linkRows,
+        validation.ok
+          ? 'Next: review WI_TEMPLATES, then open SYNC_LINKS and approve mappings.'
+          : 'Next: fill PFMEA_SPREADSHEET_ID and KPLN_SHEET_NAME in SYNC_CONFIG, then run Refresh Link Matrix.'
+      ];
+      if (validation.errors.length) {
+        message.push('Errors: ' + validation.errors.join(' | '));
+      }
+      if (validation.warnings.length) {
+        message.push('Warnings: ' + validation.warnings.join(' | '));
+      }
+      ui.alert(APP_CONSTANTS.PROJECT_NAME, message.join('\n'), ui.ButtonSet.OK);
+      return result;
+    });
   }
 
   function refreshActualLinksAction() {
-    var result = ActualSyncService.refreshLinks();
-    var ui = SpreadsheetApp.getUi();
-    var message = [
-      'Actual link matrix refreshed.',
-      'PFMEA sheets scanned: ' + result.pfmeaSheets,
-      'PFMEA rows indexed: ' + result.pfmeaRows,
-      'KPLN blocks found: ' + result.kplnBlocks,
-      'SYNC_LINKS rows created: ' + result.linkRows
-    ].join('\n');
-    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
-    return result;
+    return runActualAction_(function() {
+      var result = ActualSyncService.refreshLinks();
+      var ui = SpreadsheetApp.getUi();
+      var message = [
+        'Actual link matrix refreshed.',
+        'PFMEA sheets scanned: ' + result.pfmeaSheets,
+        'PFMEA rows indexed: ' + result.pfmeaRows,
+        'KPLN blocks found: ' + result.kplnBlocks,
+        'SYNC_LINKS rows created: ' + result.linkRows
+      ];
+      if (result.validation && result.validation.warnings.length) {
+        message.push('Warnings: ' + result.validation.warnings.join(' | '));
+      }
+      ui.alert(APP_CONSTANTS.PROJECT_NAME, message.join('\n'), ui.ButtonSet.OK);
+      return result;
+    });
   }
 
   function previewActualSyncAction() {
-    var result = ActualSyncService.previewSync();
-    showActualSummary_(result, 'Actual sync preview completed.');
-    return result;
+    return runActualAction_(function() {
+      var result = ActualSyncService.previewSync();
+      showActualSummary_(result, 'Actual sync preview completed.');
+      return result;
+    });
   }
 
   function refreshActualTemplatesAction() {
-    var result = ActualSyncService.refreshTemplates();
-    SpreadsheetApp.getUi().alert(
-      APP_CONSTANTS.PROJECT_NAME,
-      'WI templates refreshed.\nTemplate rows: ' + result.templateRows,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    return result;
+    return runActualAction_(function() {
+      var result = ActualSyncService.refreshTemplates();
+      SpreadsheetApp.getUi().alert(
+        APP_CONSTANTS.PROJECT_NAME,
+        'WI templates refreshed.\nTemplate rows: ' + result.templateRows,
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      return result;
+    });
   }
 
   function runActualSyncAction() {
@@ -191,9 +211,11 @@ var UIService = (function() {
     if (response !== ui.Button.YES) {
       return null;
     }
-    var result = ActualSyncService.runSync();
-    showActualSummary_(result, 'Actual sync completed.');
-    return result;
+    return runActualAction_(function() {
+      var result = ActualSyncService.runSync();
+      showActualSummary_(result, 'Actual sync completed.');
+      return result;
+    });
   }
 
   function openActualConfigAction() {
@@ -220,6 +242,15 @@ var UIService = (function() {
       'WI writes: ' + result.wiWrites
     ].join('\n');
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+  }
+
+  function runActualAction_(action) {
+    try {
+      return action();
+    } catch (error) {
+      SpreadsheetApp.getUi().alert(APP_CONSTANTS.PROJECT_NAME, error.message || String(error), SpreadsheetApp.getUi().ButtonSet.OK);
+      return null;
+    }
   }
 
   return {

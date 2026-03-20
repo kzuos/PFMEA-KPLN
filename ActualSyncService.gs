@@ -6,9 +6,9 @@ var ActualSyncService = (function() {
     WI_TEMPLATES_SHEET: 'WI_TEMPLATES',
     PFMEA_VIEW_SHEET: 'PFMEA_SYNC_VIEW',
     LOG_SHEET: 'CHANGE_LOG',
-    DEFAULT_PFMEA_SPREADSHEET_ID: '1h8Xa_qbSM9r9fCu6OcitXYanY-WWMDlKDqcUzOZHwGQ',
-    DEFAULT_KPLN_SHEET_NAME: 'FR.000189',
-    DEFAULT_WI_TEMPLATE_FOLDER_ID: '1FUzjKn9EE-CTZZydxfotjREvyr9lZDei',
+    DEFAULT_PFMEA_SPREADSHEET_ID: '',
+    DEFAULT_KPLN_SHEET_NAME: '',
+    DEFAULT_WI_TEMPLATE_FOLDER_ID: '',
     CONFIG_HEADERS: ['KEY', 'VALUE', 'DESCRIPTION'],
     LINKS_HEADERS: [
       'ACTIVE',
@@ -66,6 +66,10 @@ var ActualSyncService = (function() {
       'PREVENTION_CONTROLS',
       'DETECTION_CONTROLS',
       'SPECIAL_CHARACTERISTIC',
+      'PRODUCT_CHARACTERISTIC',
+      'PROCESS_CHARACTERISTIC',
+      'SPECIFICATION_TOLERANCE',
+      'REACTION_PLAN',
       'PFMEA_AP'
     ],
     LINK_STATUS: {
@@ -86,12 +90,18 @@ var ActualSyncService = (function() {
     writeConfigDefaults_();
     var config = getConfig_();
     ensureWorkInstructionFolder_(config);
+    config = getConfig_();
     var templates = refreshTemplatesFromFolder_(config);
-    var refreshResult = refreshLinks();
+    var validation = validateActualConfiguration_(config);
+    var refreshResult = createEmptyRefreshSummary_();
+    if (validation.ok) {
+      refreshResult = refreshLinks();
+    }
     return {
       config: config,
       templates: templates,
-      refresh: refreshResult
+      refresh: refreshResult,
+      validation: validation
     };
   }
 
@@ -100,6 +110,7 @@ var ActualSyncService = (function() {
     writeConfigDefaults_();
 
     var config = getConfig_();
+    var validation = assertActualConfigurationReady_(config);
     refreshTemplatesFromFolder_(config);
     var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
     var pfmeaSheets = collectPfmeaSheetSummaries_(pfmeaSpreadsheet);
@@ -115,7 +126,8 @@ var ActualSyncService = (function() {
       pfmeaSheets: pfmeaSheets.length,
       pfmeaRows: pfmeaViewRows.length,
       kplnBlocks: kplnBlocks.length,
-      linkRows: suggestedLinks.length
+      linkRows: suggestedLinks.length,
+      validation: validation
     };
   }
 
@@ -150,6 +162,7 @@ var ActualSyncService = (function() {
   function runSync_(dryRun, mode) {
     ensureHelperSheets_();
     var config = getConfig_();
+    assertActualConfigurationReady_(config);
     var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
     var links = loadSyncLinks_(config);
     var summary = {
@@ -375,12 +388,12 @@ var ActualSyncService = (function() {
       stepTitle: chooseDominantValue_(pfmeaRows, 'PROCESS_STEP') || link.KPLN_STEP_TITLE,
       processDescription: chooseDominantValue_(pfmeaRows, 'PROCESS_ITEM') || link.PFMEA_PROCESS_NAME,
       failureSummary: buildFailureSummary_(pfmeaRows),
-      productCharacteristics: chooseDominantValue_(pfmeaRows, 'PROCESS_STEP'),
-      processCharacteristics: chooseDominantValue_(pfmeaRows, 'WORK_ELEMENT_4M'),
+      productCharacteristics: joinUniqueField_(pfmeaRows, 'PRODUCT_CHARACTERISTIC', ', '),
+      processCharacteristics: joinUniqueField_(pfmeaRows, 'PROCESS_CHARACTERISTIC', ', ') || chooseDominantValue_(pfmeaRows, 'WORK_ELEMENT_4M'),
       specialCharacteristics: aggregateUniqueField_(pfmeaRows, 'SPECIAL_CHARACTERISTIC').join(', '),
-      specificationTolerance: '',
+      specificationTolerance: joinUniqueField_(pfmeaRows, 'SPECIFICATION_TOLERANCE', ', '),
       controlMethod: buildControlMethodSummary_(pfmeaRows),
-      reactionPlan: '',
+      reactionPlan: joinUniqueField_(pfmeaRows, 'REACTION_PLAN', '; '),
       preventionControls: aggregateUniqueField_(pfmeaRows, 'PREVENTION_CONTROLS').join('; '),
       detectionControls: aggregateUniqueField_(pfmeaRows, 'DETECTION_CONTROLS').join('; '),
       issueNos: aggregateUniqueField_(pfmeaRows, 'ISSUE_NO').join(', ')
@@ -424,6 +437,10 @@ var ActualSyncService = (function() {
     }).filter(function(value) {
       return !!value;
     }));
+  }
+
+  function joinUniqueField_(rows, fieldName, separator) {
+    return aggregateUniqueField_(rows, fieldName).join(separator || ', ');
   }
 
   function chooseDominantValue_(rows, fieldName) {
@@ -547,6 +564,10 @@ var ActualSyncService = (function() {
       PREVENTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT PREVENTION CONTROL'),
       DETECTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT DETECTION CONTROL'),
       SPECIAL_CHARACTERISTIC: findHeaderIndex_(detailHeaders, 'SPECIAL CHARACTERISTIC'),
+      PRODUCT_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PRODUCT CHARACTERISTIC', 'PRODUCT CHAR']),
+      PROCESS_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PROCESS CHARACTERISTIC', 'PROCESS CHAR']),
+      SPECIFICATION_TOLERANCE: findFirstHeaderIndex_(detailHeaders, ['SPECIFICATION / TOLERANCE', 'SPECIFICATION', 'TOLERANCE']),
+      REACTION_PLAN: findFirstHeaderIndex_(detailHeaders, ['REACTION PLAN', 'ACTION PLAN', 'CONTINGENCY ACTION']),
       PFMEA_AP: findHeaderIndex_(detailHeaders, 'PFMEA AP')
     };
 
@@ -577,6 +598,10 @@ var ActualSyncService = (function() {
         PREVENTION_CONTROLS: prevention,
         DETECTION_CONTROLS: detection,
         SPECIAL_CHARACTERISTIC: getCellByIndex_(row, indexMap.SPECIAL_CHARACTERISTIC),
+        PRODUCT_CHARACTERISTIC: getCellByIndex_(row, indexMap.PRODUCT_CHARACTERISTIC),
+        PROCESS_CHARACTERISTIC: getCellByIndex_(row, indexMap.PROCESS_CHARACTERISTIC),
+        SPECIFICATION_TOLERANCE: getCellByIndex_(row, indexMap.SPECIFICATION_TOLERANCE),
+        REACTION_PLAN: getCellByIndex_(row, indexMap.REACTION_PLAN),
         PFMEA_AP: getCellByIndex_(row, indexMap.PFMEA_AP)
       });
     }
@@ -594,6 +619,16 @@ var ActualSyncService = (function() {
     for (var index = 0; index < headers.length; index += 1) {
       if (normalizeText_(headers[index]).indexOf(normalizedNeedle) > -1) {
         return index;
+      }
+    }
+    return -1;
+  }
+
+  function findFirstHeaderIndex_(headers, containsTexts) {
+    for (var index = 0; index < containsTexts.length; index += 1) {
+      var headerIndex = findHeaderIndex_(headers, containsTexts[index]);
+      if (headerIndex > -1) {
+        return headerIndex;
       }
     }
     return -1;
@@ -876,14 +911,14 @@ var ActualSyncService = (function() {
       WI_TEMPLATE_FOLDER_ID: CONSTANTS.DEFAULT_WI_TEMPLATE_FOLDER_ID
     };
     var descriptions = {
-      PFMEA_SPREADSHEET_ID: 'Source PFMEA spreadsheet ID.',
-      KPLN_SHEET_NAME: 'Formatted KPLN sheet name in this spreadsheet.',
+      PFMEA_SPREADSHEET_ID: 'Source PFMEA spreadsheet ID. Required before refreshing links or running actual sync.',
+      KPLN_SHEET_NAME: 'Formatted KPLN sheet name in this spreadsheet. Required before refreshing links or running actual sync.',
       KPLN_DATA_START_ROW: 'First KPLN data row after the header band.',
       ONLY_APPROVED_LINKS: 'TRUE to sync only APPROVED rows from SYNC_LINKS.',
       CREATE_MISSING_WI_DOCS: 'TRUE to create a Google Doc when no WI_DOC_ID exists.',
       WI_FOLDER_ID: 'Drive folder ID used for created Work Instructions.',
       WI_TEMPLATE_DOC_ID: 'Optional Google Doc template for created Work Instructions.',
-      WI_TEMPLATE_FOLDER_ID: 'Drive folder ID that stores the company Work Instruction template files (.docx or Google Docs).'
+      WI_TEMPLATE_FOLDER_ID: 'Optional Drive folder ID that stores the company Work Instruction template files (.docx or Google Docs).'
     };
     var sheet = getSheet_(CONSTANTS.CONFIG_SHEET);
     var existing = {};
@@ -916,6 +951,60 @@ var ActualSyncService = (function() {
       WI_FOLDER_ID: config.WI_FOLDER_ID || '',
       WI_TEMPLATE_DOC_ID: config.WI_TEMPLATE_DOC_ID || '',
       WI_TEMPLATE_FOLDER_ID: config.WI_TEMPLATE_FOLDER_ID || CONSTANTS.DEFAULT_WI_TEMPLATE_FOLDER_ID
+    };
+  }
+
+  function validateActualConfiguration_(config) {
+    var validation = {
+      ok: true,
+      errors: [],
+      warnings: []
+    };
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var startRow = toNumber_(config.KPLN_DATA_START_ROW);
+
+    if (!SyncUtils.asString(config.PFMEA_SPREADSHEET_ID)) {
+      validation.errors.push('Set PFMEA_SPREADSHEET_ID in SYNC_CONFIG before refreshing links or running actual sync.');
+    } else {
+      try {
+        SpreadsheetApp.openById(config.PFMEA_SPREADSHEET_ID);
+      } catch (error) {
+        validation.errors.push('PFMEA_SPREADSHEET_ID is not accessible: ' + error.message);
+      }
+    }
+
+    if (!SyncUtils.asString(config.KPLN_SHEET_NAME)) {
+      validation.errors.push('Set KPLN_SHEET_NAME in SYNC_CONFIG before refreshing links or running actual sync.');
+    } else if (!spreadsheet.getSheetByName(config.KPLN_SHEET_NAME)) {
+      validation.errors.push('KPLN sheet "' + config.KPLN_SHEET_NAME + '" was not found in this spreadsheet.');
+    }
+
+    if (startRow < 1) {
+      validation.errors.push('KPLN_DATA_START_ROW must be a positive integer.');
+    }
+
+    if (!SyncUtils.asString(config.WI_TEMPLATE_FOLDER_ID)) {
+      validation.warnings.push('WI_TEMPLATE_FOLDER_ID is blank. Template discovery will rely on manual WI_TEMPLATES rows.');
+    }
+
+    validation.ok = validation.errors.length === 0;
+    return validation;
+  }
+
+  function assertActualConfigurationReady_(config) {
+    var validation = validateActualConfiguration_(config);
+    if (!validation.ok) {
+      throw new Error('Actual sync configuration is incomplete: ' + validation.errors.join(' | '));
+    }
+    return validation;
+  }
+
+  function createEmptyRefreshSummary_() {
+    return {
+      pfmeaSheets: 0,
+      pfmeaRows: 0,
+      kplnBlocks: 0,
+      linkRows: 0
     };
   }
 
@@ -1161,37 +1250,37 @@ var ActualSyncService = (function() {
     return [
       {
         TEMPLATE_KEY: 'FOUNDRY_PROCESS_CONTROL',
-        DISPLAY_NAME: 'Dökümhane Proses Kontrol Talimatı',
-        MATCH_KEYWORDS: 'dökümhane;proses kontrol;operator control;process control',
+        DISPLAY_NAME: 'Dokumhane Proses Kontrol Talimati',
+        MATCH_KEYWORDS: 'dokumhane;proses kontrol;operator control;process control',
         NOTES: 'Use for foundry process control instructions with control-point tables.'
       },
       {
         TEMPLATE_KEY: 'CAST_CONTROL',
-        DISPLAY_NAME: 'Dökülmüş Kontrol Talimatı',
-        MATCH_KEYWORDS: 'dökülmüş;casting quality;kalite kontrol;quality control',
+        DISPLAY_NAME: 'Dokulmus Kontrol Talimati',
+        MATCH_KEYWORDS: 'dokulmus;casting quality;kalite kontrol;quality control',
         NOTES: 'Use for visual or post-casting quality control instructions.'
       },
       {
         TEMPLATE_KEY: 'TRIMMING',
-        DISPLAY_NAME: 'Trimleme Talimatı',
+        DISPLAY_NAME: 'Trimleme Talimati',
         MATCH_KEYWORDS: 'trimleme;trimming',
         NOTES: 'Use for trimming operation instructions.'
       },
       {
         TEMPLATE_KEY: 'MILLING',
-        DISPLAY_NAME: 'Freze Talimatı',
-        MATCH_KEYWORDS: 'freze;milling;mekanik işlem',
+        DISPLAY_NAME: 'Freze Talimati',
+        MATCH_KEYWORDS: 'freze;milling;mekanik islem',
         NOTES: 'Use for milling or machining operation instructions.'
       },
       {
         TEMPLATE_KEY: 'FINAL_CONTROL',
-        DISPLAY_NAME: 'Final Kontrol Talimatı',
+        DISPLAY_NAME: 'Final Kontrol Talimati',
         MATCH_KEYWORDS: 'final kontrol;final control',
         NOTES: 'Use for final inspection instructions.'
       },
       {
         TEMPLATE_KEY: 'PACKAGING',
-        DISPLAY_NAME: 'Paketleme Talimatı',
+        DISPLAY_NAME: 'Paketleme Talimati',
         MATCH_KEYWORDS: 'paketleme;packaging;ambalaj',
         NOTES: 'Use for packing and shipping instructions.'
       },
@@ -1312,14 +1401,25 @@ var ActualSyncService = (function() {
   }
 
   function normalizeRoutingText_(value) {
-    var text = SyncUtils.asString(value).toUpperCase();
+    var text = SyncUtils.asString(value);
+    [
+      ['\u00E7', 'c'],
+      ['\u00C7', 'C'],
+      ['\u011F', 'g'],
+      ['\u011E', 'G'],
+      ['\u0131', 'i'],
+      ['\u0130', 'I'],
+      ['\u00F6', 'o'],
+      ['\u00D6', 'O'],
+      ['\u015F', 's'],
+      ['\u015E', 'S'],
+      ['\u00FC', 'u'],
+      ['\u00DC', 'U']
+    ].forEach(function(replacement) {
+      text = text.split(replacement[0]).join(replacement[1]);
+    });
     return text
-      .replace(/[Ç]/g, 'C')
-      .replace(/[Ğ]/g, 'G')
-      .replace(/[İI]/g, 'I')
-      .replace(/[Ö]/g, 'O')
-      .replace(/[Ş]/g, 'S')
-      .replace(/[Ü]/g, 'U')
+      .toUpperCase()
       .replace(/[^A-Z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -1336,6 +1436,9 @@ var ActualSyncService = (function() {
   }
 
   function openPfmeaSpreadsheet_(config) {
+    if (!SyncUtils.asString(config.PFMEA_SPREADSHEET_ID)) {
+      throw new Error('PFMEA_SPREADSHEET_ID is blank. Set it in SYNC_CONFIG first.');
+    }
     return SpreadsheetApp.openById(config.PFMEA_SPREADSHEET_ID);
   }
 

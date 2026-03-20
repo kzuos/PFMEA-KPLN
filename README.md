@@ -1,7 +1,12 @@
 # PFMEA Sync System
 
 ## 1. Short system architecture explanation
-PFMEA Sync System is a Google Workspace-native MVP built as a bound Google Apps Script project inside the master Google Sheet. The `PFMEA` tab is the source of truth. An installable edit trigger or a manual menu action reads PFMEA rows, applies the mapping rules stored in the `MAPPING` tab, updates linked rows in `CONTROL_PLAN`, updates deterministic step sections in Google Docs Work Instructions, and records every action in `CHANGE_LOG`.
+PFMEA Sync System is a Google Workspace-native MVP built as a bound Google Apps Script project inside the master Google Sheet. The repository currently contains two sync paths:
+
+- the generic MVP flow driven by `PFMEA`, `CONTROL_PLAN`, `MAPPING`, and `CONFIG`
+- the newer actual plant rollout flow driven by `SYNC_CONFIG`, `SYNC_LINKS`, `WI_TEMPLATES`, and `WI_REGISTRY`
+
+The generic flow treats the `PFMEA` tab as the source of truth. The actual rollout flow is more helper-sheet-driven: it reads the external PFMEA workbook, scans the in-sheet KPLN format, builds a suggested link matrix, and then syncs only approved links into KPLN blocks and Work Instructions while recording all actions in `CHANGE_LOG`.
 
 This is deliberately a practical manufacturing-first design:
 
@@ -128,6 +133,7 @@ Rules:
 
 ## 6. Full project file list
 - `Code.gs`
+- `ActualSyncService.gs`
 - `Config.gs`
 - `SyncService.gs`
 - `MappingService.gs`
@@ -157,10 +163,11 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 3. Create Apps Script files matching the repository names and paste in the code.
 4. Replace the manifest with `appsscript.json`.
 5. Save the script project and reload the spreadsheet.
-6. From the custom menu `PFMEA Sync System`, run `Setup System`.
+6. From the custom menu `PFMEA Sync System`, run `Setup System` for the generic MVP and `Setup Actual Sync` for the actual rollout helper sheets.
 7. Authorize the required Google permissions.
-8. Review the seeded `PFMEA`, `CONTROL_PLAN`, `MAPPING`, `CHANGE_LOG`, and `CONFIG` tabs.
-9. Adjust config values as needed:
+8. Review the seeded generic tabs `PFMEA`, `CONTROL_PLAN`, `MAPPING`, `CHANGE_LOG`, and `CONFIG`.
+9. Review the seeded actual rollout tabs `SYNC_CONFIG`, `SYNC_LINKS`, `WI_TEMPLATES`, `WI_REGISTRY`, and `PFMEA_SYNC_VIEW`.
+10. Adjust config values as needed:
    - `DEFAULT_WI_DOC_ID`
    - `CREATE_MISSING_WI_DOCS`
    - `WI_TEMPLATE_DOC_ID`
@@ -169,10 +176,23 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
    - `SYNC_MODE`
    - `DRY_RUN_MODE`
    - `ALLOW_OVERWRITE`
-10. Replace or extend the default mapping rules to match your plant naming and downstream logic.
+11. For the actual rollout flow, fill these `SYNC_CONFIG` values before refreshing links:
+   - `PFMEA_SPREADSHEET_ID`
+   - `KPLN_SHEET_NAME`
+   - `KPLN_DATA_START_ROW` if your formatted KPLN starts elsewhere
+   - `WI_TEMPLATE_FOLDER_ID` if you want Drive template discovery
+12. Replace or extend the default mapping rules to match your plant naming and downstream logic.
 
 ## 10. How to deploy/use inside Google Sheets
 ### Menu actions
+- `Setup Actual Sync`: creates the actual rollout helper sheets, seeds `SYNC_CONFIG`, ensures the WI folder exists, and refreshes links when the required config is present.
+- `Refresh Link Matrix`: rescans PFMEA sheets and KPLN blocks, then rebuilds `SYNC_LINKS` and `PFMEA_SYNC_VIEW`.
+- `Refresh WI Templates`: reindexes the template catalog from `WI_TEMPLATE_FOLDER_ID`.
+- `Preview Actual Sync`: dry-run for approved rows in `SYNC_LINKS`.
+- `Run Actual Sync`: writes approved KPLN and Work Instruction updates for `SYNC_LINKS`.
+- `Open Actual Config`: jumps to `SYNC_CONFIG`.
+- `Open Actual Links`: jumps to `SYNC_LINKS`.
+- `Open WI Templates`: jumps to `WI_TEMPLATES`.
 - `Setup System`: creates missing tabs, seeds defaults, creates a default Work Instruction doc, and ensures the installable edit trigger exists.
 - `Run Full Sync`: processes all PFMEA rows.
 - `Sync Selected PFMEA Row`: syncs only the selected PFMEA row.
@@ -184,6 +204,15 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 - The installable trigger runs `handleSpreadsheetEdit`.
 - If `SYNC_MODE=AUTO`, PFMEA edits trigger downstream updates automatically.
 - If `SYNC_MODE=MANUAL`, users sync via menu actions only.
+
+## Actual rollout checklist
+1. Run `Setup Actual Sync`.
+2. Fill `PFMEA_SPREADSHEET_ID` and `KPLN_SHEET_NAME` in `SYNC_CONFIG`.
+3. Run `Refresh Link Matrix`.
+4. Review `WI_TEMPLATES` and confirm template routing.
+5. Review `SYNC_LINKS`, fix suggestions, and mark only trusted rows as `APPROVED`.
+6. Run `Preview Actual Sync`.
+7. If the preview looks correct, run `Run Actual Sync`.
 
 ## 11. Example workflow
 1. A quality engineer edits PFMEA row `PFR-1234ABCD` for `STEP-OP10`.
