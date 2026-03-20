@@ -78,6 +78,10 @@ var ActualSyncService = (function() {
       UNMAPPED: 'UNMAPPED',
       IGNORE: 'IGNORE'
     },
+    PFMEA_SELECTION: {
+      WARNING_ROW_COUNT: 25,
+      ERROR_ROW_COUNT: 100
+    },
     UPDATE_COLUMNS: {
       STEP_TITLE: 2,
       CONTROL_METHOD: 13,
@@ -241,6 +245,17 @@ var ActualSyncService = (function() {
       result.logEntries.push(createActualLogEntry_(mode, link, 'NO_PFMEA_MATCH', APP_CONSTANTS.STATUS.SKIPPED, '', '', 'No PFMEA rows matched this approved link.'));
       return result;
     }
+    var selectionInspection = inspectPfmeaSelection_(link, pfmeaRows);
+    if (selectionInspection.error) {
+      result.errors += 1;
+      result.logEntries.push(createActualLogEntry_(mode, link, 'PFMEA_SELECTION_TOO_BROAD', APP_CONSTANTS.STATUS.ERROR, '', {
+        rowCount: selectionInspection.rowCount,
+        distinctSteps: selectionInspection.distinctSteps,
+        distinctProcesses: selectionInspection.distinctProcesses,
+        pfmeaStepFilter: SyncUtils.asString(link.PFMEA_STEP_FILTER)
+      }, selectionInspection.error));
+      return result;
+    }
 
     var payload = buildActualPayload_(pfmeaRows, link);
     var kplnSheet = getSheet_(config.KPLN_SHEET_NAME);
@@ -338,14 +353,14 @@ var ActualSyncService = (function() {
     }
 
     if ((docResolution.status === APP_CONSTANTS.STATUS.SUCCESS || docResolution.status === APP_CONSTANTS.STATUS.PREVIEW) && docResolution.docId) {
-      if (!dryRun && docResolution.docId !== docId) {
-        updateLinkDocumentId_(link.LINK_KEY, docResolution.docId, docResolution.documentName || payload.stepTitle || link.KPLN_STEP_TITLE);
-        upsertRegistryEntry_(link, docResolution.docId, docResolution.documentName || payload.stepTitle || link.KPLN_STEP_TITLE);
+      var resolvedDocName = docResolution.documentName || SyncUtils.asString(link.WI_TITLE) || payload.stepTitle || link.KPLN_STEP_TITLE;
+      if (!dryRun) {
+        if (docResolution.docId !== docId || !link.WI_DOC_ID) {
+          updateLinkDocumentId_(link.LINK_KEY, docResolution.docId, resolvedDocName);
+        }
+        upsertRegistryEntry_(link, docResolution.docId, resolvedDocName);
         link.WI_DOC_ID = docResolution.docId;
-      } else if (!dryRun && !link.WI_DOC_ID) {
-        updateLinkDocumentId_(link.LINK_KEY, docResolution.docId, docResolution.documentName || payload.stepTitle || link.KPLN_STEP_TITLE);
-        link.WI_DOC_ID = docResolution.docId;
-      } else if (dryRun && docResolution.docId.indexOf('PREVIEW-') !== 0) {
+      } else if (docResolution.docId.indexOf('PREVIEW-') !== 0) {
         link.WI_DOC_ID = docResolution.docId;
       }
       result.changed += 1;
@@ -546,8 +561,8 @@ var ActualSyncService = (function() {
       cache[sheetName] = parsePfmeaSheet_(pfmeaSpreadsheet.getSheetByName(sheetName));
     }
     var rows = cache[sheetName] || [];
-    var filterText = normalizeText_(link.PFMEA_STEP_FILTER);
-    if (!filterText) {
+    var filterTerms = splitFilterTerms_(link.PFMEA_STEP_FILTER);
+    if (!filterTerms.length) {
       return rows;
     }
     return rows.filter(function(row) {
@@ -557,7 +572,9 @@ var ActualSyncService = (function() {
         row.FAILURE_MODE,
         row.FAILURE_CAUSE
       ].join(' '));
-      return haystack.indexOf(filterText) > -1;
+      return filterTerms.some(function(filterText) {
+        return haystack.indexOf(filterText) > -1;
+      });
     });
   }
 
@@ -751,7 +768,7 @@ var ActualSyncService = (function() {
         LINK_KEY: block.linkKey,
         PFMEA_SHEET_NAME: existing.PFMEA_SHEET_NAME || suggestion.sheetName,
         PFMEA_PROCESS_NAME: existing.PFMEA_PROCESS_NAME || suggestion.processName,
-        PFMEA_STEP_FILTER: existing.PFMEA_STEP_FILTER || '',
+        PFMEA_STEP_FILTER: existing.PFMEA_STEP_FILTER || buildSuggestedStepFilter_(block, suggestion),
         KPLN_PROCESS_NO: block.processNo,
         KPLN_STEP_TITLE: block.stepTitle,
         KPLN_ROW_START: String(block.rowStart),
@@ -768,6 +785,23 @@ var ActualSyncService = (function() {
       return CONSTANTS.LINKS_HEADERS.map(function(header) {
         return linkRow[header] || '';
       });
+    });
+  }
+
+  function buildSuggestedStepFilter_(block, suggestion) {
+    var candidates = [];
+    collectFilterCandidates_(candidates, block.stepTitle);
+    collectFilterCandidates_(candidates, suggestion ? suggestion.processName : '');
+    collectFilterCandidates_(candidates, block.majorProcessTitle);
+    return SyncUtils.unique(candidates).slice(0, 3).join(' | ');
+  }
+
+  function collectFilterCandidates_(candidates, value) {
+    SyncUtils.asString(value).split(/(?:\r?\n|\s\/\s|[|;])/).forEach(function(part) {
+      var candidate = SyncUtils.asString(part).trim();
+      if (normalizeText_(candidate).length >= 4) {
+        candidates.push(candidate);
+      }
     });
   }
 
@@ -899,6 +933,25 @@ var ActualSyncService = (function() {
       .replace(/[^A-Z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  function splitFilterTerms_(value) {
+    return SyncUtils.unique(SyncUtils.asString(value).split(/(?:\r?\n|[|;])/).map(function(part) {
+      return normalizeText_(part);
+    }).filter(function(part) {
+      return !!part;
+    }));
+  }
+
+  function countDistinctFieldValues_(rows, fieldName) {
+    var values = {};
+    rows.forEach(function(row) {
+      var normalized = normalizeText_(row[fieldName]);
+      if (normalized) {
+        values[normalized] = true;
+      }
+    });
+    return Object.keys(values).length;
   }
 
   function ensureHelperSheets_() {
@@ -1261,10 +1314,13 @@ var ActualSyncService = (function() {
       approvedInvalidKplnRow: 0,
       approvedMissingTemplateConfig: 0,
       approvedMissingWiDocAssignment: 0,
+      approvedSelectionWarnings: 0,
+      approvedSelectionErrors: 0,
       errors: [],
       warnings: []
     };
     var pfmeaSheetMap = {};
+    var pfmeaCache = {};
     var kplnLastRow = kplnSheet ? kplnSheet.getLastRow() : 0;
     var kplnDataStartRow = toNumber_(config.KPLN_DATA_START_ROW);
 
@@ -1302,6 +1358,16 @@ var ActualSyncService = (function() {
         summary.approvedMissingPfmeaSheet += 1;
       } else if (sourceSpreadsheet && !pfmeaSheetMap[link.PFMEA_SHEET_NAME]) {
         summary.approvedMissingPfmeaSheet += 1;
+      } else if (sourceSpreadsheet) {
+        var pfmeaRows = getPfmeaRowsForLink_(link, sourceSpreadsheet, pfmeaCache);
+        var selectionInspection = inspectPfmeaSelection_(link, pfmeaRows);
+        if (selectionInspection.error) {
+          summary.approvedSelectionErrors += 1;
+          summary.errors.push(selectionInspection.error);
+        } else if (selectionInspection.warning) {
+          summary.approvedSelectionWarnings += 1;
+          summary.warnings.push(selectionInspection.warning);
+        }
       }
 
       if (kplnSheet) {
@@ -1349,6 +1415,43 @@ var ActualSyncService = (function() {
     }
 
     return summary;
+  }
+
+  function inspectPfmeaSelection_(link, pfmeaRows) {
+    var filterTerms = splitFilterTerms_(link.PFMEA_STEP_FILTER);
+    var distinctSteps = countDistinctFieldValues_(pfmeaRows, 'PROCESS_STEP');
+    var distinctProcesses = countDistinctFieldValues_(pfmeaRows, 'PROCESS_ITEM');
+    var linkLabel = SyncUtils.asString(link.LINK_KEY) || SyncUtils.asString(link.KPLN_PROCESS_NO) || 'UNKNOWN_LINK';
+    var sheetLabel = SyncUtils.asString(link.PFMEA_SHEET_NAME) || 'UNKNOWN_SHEET';
+    var result = {
+      rowCount: pfmeaRows.length,
+      distinctSteps: distinctSteps,
+      distinctProcesses: distinctProcesses,
+      usesFilter: filterTerms.length > 0,
+      warning: '',
+      error: ''
+    };
+
+    if (!pfmeaRows.length) {
+      result.error = 'Approved link ' + linkLabel + ' currently matches 0 PFMEA rows on sheet ' + sheetLabel + '. Review PFMEA_SHEET_NAME and PFMEA_STEP_FILTER before preview or sync.';
+      return result;
+    }
+
+    if (pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.ERROR_ROW_COUNT) {
+      result.error = 'Approved link ' + linkLabel + ' currently matches ' + pfmeaRows.length + ' PFMEA rows on sheet ' + sheetLabel + '. Narrow PFMEA_STEP_FILTER before preview or sync.';
+      return result;
+    }
+
+    if (!result.usesFilter && (pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.WARNING_ROW_COUNT || distinctSteps > 1 || distinctProcesses > 1)) {
+      result.warning = 'Approved link ' + linkLabel + ' uses a blank PFMEA_STEP_FILTER and currently matches ' + pfmeaRows.length + ' PFMEA rows on sheet ' + sheetLabel + '. Add a step filter before live sync.';
+      return result;
+    }
+
+    if (result.usesFilter && pfmeaRows.length >= CONSTANTS.PFMEA_SELECTION.WARNING_ROW_COUNT && (distinctSteps > 1 || distinctProcesses > 1)) {
+      result.warning = 'Approved link ' + linkLabel + ' still matches a broad PFMEA selection (' + pfmeaRows.length + ' rows on sheet ' + sheetLabel + '). Review PFMEA_STEP_FILTER before live sync.';
+    }
+
+    return result;
   }
 
   function buildTemplateValidationSummary_(templates) {
