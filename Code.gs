@@ -168,10 +168,14 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.previewSync();
     });
+  } else if (action === 'run') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.runSync();
+    });
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, refreshTemplates, validate, or preview.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, refreshTemplates, validate, preview, or run.'
     };
   }
 
