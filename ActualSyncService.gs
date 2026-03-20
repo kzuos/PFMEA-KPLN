@@ -953,26 +953,29 @@ var ActualSyncService = (function() {
       var existing = existingLinks[block.linkKey] || {};
       var suggestion = suggestPfmeaSheet_(block, pfmeaSheets);
       var suggestedTemplateKey = suggestTemplateKeyFromBlock_(block);
-      var linkStatus = existing.LINK_STATUS || suggestion.status;
+      var processHint = getProcessHintForBlock_(block, pfmeaSheets);
+      var effectiveSuggestion = applyProcessHint_(suggestion, processHint, pfmeaSheets);
+      var keepExisting = shouldKeepExistingLinkMapping_(existing);
+      var linkStatus = keepExisting ? (existing.LINK_STATUS || effectiveSuggestion.status) : effectiveSuggestion.status;
       var linkRow = {
-        ACTIVE: existing.ACTIVE || (linkStatus === CONSTANTS.LINK_STATUS.UNMAPPED ? 'FALSE' : 'TRUE'),
+        ACTIVE: keepExisting ? (existing.ACTIVE || (linkStatus === CONSTANTS.LINK_STATUS.UNMAPPED ? 'FALSE' : 'TRUE')) : deriveAutoLinkActive_(linkStatus, processHint),
         LINK_STATUS: linkStatus,
         LINK_KEY: block.linkKey,
-        PFMEA_SHEET_NAME: existing.PFMEA_SHEET_NAME || suggestion.sheetName,
-        PFMEA_PROCESS_NAME: existing.PFMEA_PROCESS_NAME || suggestion.processName,
-        PFMEA_STEP_FILTER: existing.PFMEA_STEP_FILTER || buildSuggestedStepFilter_(block, suggestion),
+        PFMEA_SHEET_NAME: keepExisting ? (existing.PFMEA_SHEET_NAME || effectiveSuggestion.sheetName) : effectiveSuggestion.sheetName,
+        PFMEA_PROCESS_NAME: keepExisting ? (existing.PFMEA_PROCESS_NAME || effectiveSuggestion.processName) : effectiveSuggestion.processName,
+        PFMEA_STEP_FILTER: keepExisting ? (existing.PFMEA_STEP_FILTER || buildSuggestedStepFilter_(block, effectiveSuggestion)) : buildSuggestedStepFilter_(block, effectiveSuggestion),
         KPLN_PROCESS_NO: block.processNo,
         KPLN_STEP_TITLE: block.stepTitle,
         KPLN_ROW_START: String(block.rowStart),
         KPLN_ROW_END: String(block.rowEnd),
-        UPDATE_STEP_TITLE: existing.UPDATE_STEP_TITLE || 'FALSE',
-        UPDATE_CONTROL_METHOD: existing.UPDATE_CONTROL_METHOD || 'FALSE',
-        UPDATE_REACTION_PLAN: existing.UPDATE_REACTION_PLAN || 'FALSE',
-        UPDATE_WI: existing.UPDATE_WI || 'TRUE',
-        WI_TEMPLATE_KEY: existing.WI_TEMPLATE_KEY || suggestedTemplateKey,
+        UPDATE_STEP_TITLE: keepExisting ? (existing.UPDATE_STEP_TITLE || 'FALSE') : 'FALSE',
+        UPDATE_CONTROL_METHOD: keepExisting ? (existing.UPDATE_CONTROL_METHOD || 'FALSE') : (linkStatus === CONSTANTS.LINK_STATUS.APPROVED ? 'TRUE' : 'FALSE'),
+        UPDATE_REACTION_PLAN: keepExisting ? (existing.UPDATE_REACTION_PLAN || 'FALSE') : (linkStatus === CONSTANTS.LINK_STATUS.APPROVED ? 'TRUE' : 'FALSE'),
+        UPDATE_WI: keepExisting ? (existing.UPDATE_WI || 'TRUE') : 'TRUE',
+        WI_TEMPLATE_KEY: keepExisting ? (existing.WI_TEMPLATE_KEY || effectiveSuggestion.templateKey || suggestedTemplateKey) : (effectiveSuggestion.templateKey || suggestedTemplateKey),
         WI_DOC_ID: existing.WI_DOC_ID || '',
         WI_TITLE: existing.WI_TITLE || ('WI - ' + block.processNo + ' - ' + block.stepTitle),
-        NOTES: existing.NOTES || (suggestion.note + ' | Suggested WI template: ' + suggestedTemplateKey)
+        NOTES: keepExisting ? (existing.NOTES || (effectiveSuggestion.note + ' | Suggested WI template: ' + (effectiveSuggestion.templateKey || suggestedTemplateKey))) : (effectiveSuggestion.note + ' | Suggested WI template: ' + (effectiveSuggestion.templateKey || suggestedTemplateKey))
       };
       return CONSTANTS.LINKS_HEADERS.map(function(header) {
         return linkRow[header] || '';
@@ -980,12 +983,204 @@ var ActualSyncService = (function() {
     });
   }
 
+  function shouldKeepExistingLinkMapping_(existing) {
+    var status = SyncUtils.asString(existing.LINK_STATUS).toUpperCase();
+    return status === CONSTANTS.LINK_STATUS.APPROVED ||
+      status === CONSTANTS.LINK_STATUS.IGNORE ||
+      !!SyncUtils.asString(existing.WI_DOC_ID);
+  }
+
+  function deriveAutoLinkActive_(linkStatus, processHint) {
+    if (processHint && processHint.active) {
+      return processHint.active;
+    }
+    return linkStatus === CONSTANTS.LINK_STATUS.UNMAPPED ? 'FALSE' : 'TRUE';
+  }
+
+  function applyProcessHint_(suggestion, processHint, pfmeaSheets) {
+    var effective = SyncUtils.mergeObjects({}, suggestion || {});
+    effective.templateKey = effective.templateKey || '';
+    if (!processHint) {
+      return effective;
+    }
+
+    var hintedSheet = findPfmeaSheetSummaryByName_(pfmeaSheets, processHint.sheetName);
+    if (hintedSheet) {
+      effective.sheetName = hintedSheet.sheetName;
+      effective.processName = processHint.processName || hintedSheet.processName || effective.processName;
+    } else if (processHint.sheetName) {
+      effective.sheetName = processHint.sheetName;
+      effective.processName = processHint.processName || effective.processName;
+    }
+
+    if (processHint.stepFilter) {
+      effective.stepFilter = processHint.stepFilter;
+    }
+    if (processHint.templateKey) {
+      effective.templateKey = processHint.templateKey;
+    }
+    if (processHint.linkStatus) {
+      effective.status = processHint.linkStatus;
+    }
+    if (processHint.note) {
+      effective.note = processHint.note;
+    }
+    return effective;
+  }
+
+  function findPfmeaSheetSummaryByName_(pfmeaSheets, sheetName) {
+    var target = SyncUtils.asString(sheetName);
+    for (var index = 0; index < pfmeaSheets.length; index += 1) {
+      if (SyncUtils.asString(pfmeaSheets[index].sheetName) === target) {
+        return pfmeaSheets[index];
+      }
+    }
+    return null;
+  }
+
   function buildSuggestedStepFilter_(block, suggestion) {
+    if (suggestion && SyncUtils.asString(suggestion.stepFilter)) {
+      return SyncUtils.asString(suggestion.stepFilter);
+    }
     var candidates = [];
     collectFilterCandidates_(candidates, block.stepTitle);
     collectFilterCandidates_(candidates, suggestion ? suggestion.processName : '');
     collectFilterCandidates_(candidates, block.majorProcessTitle);
     return SyncUtils.unique(candidates).slice(0, 3).join(' | ');
+  }
+
+  function getProcessHintForBlock_(block, pfmeaSheets) {
+    var normalized = normalizeRoutingText_([block.majorProcessTitle, block.stepTitle].join(' '));
+    var rules = [
+      {
+        patterns: ['RAW MATERIAL INCOMING', 'HAMMADDE GIRDI'],
+        sheetName: '1',
+        processName: 'Ham Madde Girdi Kontrol',
+        stepFilter: 'Alaşım numunesinin | Analiz sonucunun',
+        templateKey: 'GENERIC_MANAGED'
+      },
+      {
+        patterns: ['RAW MATERIAL MELTING', 'HAM MADDE ERGITME'],
+        sheetName: '2',
+        processName: 'Alaşım Ergitme İşlemi',
+        stepFilter: 'Ocakta ergitme | Ergitme işlemi',
+        templateKey: 'FOUNDRY_PROCESS_CONTROL'
+      },
+      {
+        patterns: ['DEGASSING', 'GAZ GIDERME'],
+        sheetName: '2',
+        processName: 'Alaşım Ergitme İşlemi',
+        stepFilter: 'Gaz alma | Degassing',
+        templateKey: 'FOUNDRY_PROCESS_CONTROL'
+      },
+      {
+        patterns: ['CASTING OPERATOR', 'DOKUM OPERATOR'],
+        sheetName: '3',
+        processName: 'Döküm',
+        stepFilter: 'Potadan | Pistona',
+        templateKey: 'FOUNDRY_PROCESS_CONTROL'
+      },
+      {
+        patterns: ['CASTING QUALITY', 'DOKUM KALITE'],
+        sheetName: '3',
+        processName: 'Döküm',
+        stepFilter: 'Enjeksiyon',
+        templateKey: 'CAST_CONTROL'
+      },
+      {
+        patterns: ['TRIMMING', 'TRIMLEME'],
+        sheetName: '4',
+        processName: 'Trimleme',
+        stepFilter: 'Kesme işlemi | Kesme | Setup',
+        templateKey: 'TRIMMING'
+      },
+      {
+        patterns: ['SAND BLASTING', 'KUMLAMA'],
+        sheetName: '6',
+        processName: 'Kumlama İşlemi',
+        stepFilter: 'Kumlama',
+        templateKey: 'FOUNDRY_PROCESS_CONTROL'
+      },
+      {
+        patterns: ['MILLING PROCESS SHIFT CHIEF', 'VARDIYA SEFI KONTROL'],
+        sheetName: '8',
+        processName: 'CNC Freze',
+        stepFilter: 'Fikstüre bağlanması | Fiksture baglanmasi',
+        templateKey: 'MILLING'
+      },
+      {
+        patterns: ['MILLING PROCESS OPERATOR', 'FREZELEME ISLEMI OPERATOR'],
+        sheetName: '8',
+        processName: 'CNC Freze',
+        stepFilter: 'CNC Frezede | işlenmesi | islenmesi',
+        templateKey: 'MILLING'
+      },
+      {
+        patterns: ['MILLING PROCESS QUALITY', 'FREZELEME ISLEMI KALITE'],
+        sheetName: '8',
+        processName: 'CNC Freze',
+        stepFilter: 'CNC Frezede | işlenmesi | islenmesi',
+        templateKey: 'MILLING'
+      },
+      {
+        patterns: ['LEAKAGE CONTROL', 'SIZDIRMAZLIK KONTROLU'],
+        sheetName: '9',
+        processName: 'Sızdırmazlık testi',
+        stepFilter: 'Sızdırmazlık testi | Sizdirmazlik testi',
+        templateKey: 'GENERIC_MANAGED'
+      },
+      {
+        patterns: ['IMPRAGNATION', 'EMPRENYELEME'],
+        sheetName: '10',
+        processName: 'Emprenye',
+        stepFilter: 'Emprenye | Vakum | Kürleme | Kurleme',
+        templateKey: 'FOUNDRY_PROCESS_CONTROL'
+      },
+      {
+        patterns: ['BOYANMIS PARCA GIRDI KONTROL', 'INCOMING CONTROL OF PAINTED PART'],
+        sheetName: '14',
+        processName: 'Dış işlem',
+        stepFilter: 'Dış işlem | Dis islem | Boyanmış | Boyanmis',
+        templateKey: 'GENERIC_MANAGED'
+      },
+      {
+        patterns: ['FINAL CONTROL', 'FINAL KONTROL'],
+        sheetName: '13',
+        processName: 'Final Kontrol',
+        stepFilter: 'Final control | Final kontrol | Final Kontrol',
+        templateKey: 'FINAL_CONTROL'
+      },
+      {
+        patterns: ['PACKING AND LABELLING', 'PAKETLEME VE ETIKETLEME'],
+        sheetName: '13',
+        processName: 'Paketleme/İstifleme',
+        stepFilter: 'Paketleme | İstifleme | Etiketleme | Paketleme/İstifleme',
+        templateKey: 'PACKAGING'
+      },
+      {
+        patterns: ['LAYOUT'],
+        linkStatus: CONSTANTS.LINK_STATUS.IGNORE,
+        active: 'FALSE',
+        templateKey: 'GENERIC_MANAGED',
+        note: 'Ignored because this KPLN block is layout-only and has no matching PFMEA process.'
+      }
+    ];
+
+    for (var index = 0; index < rules.length; index += 1) {
+      if (containsAny_(normalized, rules[index].patterns)) {
+        var rule = SyncUtils.mergeObjects({}, rules[index]);
+        if (rule.sheetName && findPfmeaSheetSummaryByName_(pfmeaSheets, rule.sheetName)) {
+          rule.linkStatus = rule.linkStatus || CONSTANTS.LINK_STATUS.APPROVED;
+          rule.note = rule.note || ('Auto-mapped from live PFMEA workbook to sheet ' + rule.sheetName + ' (' + (rule.processName || '') + ').');
+          return rule;
+        }
+        if (!rule.sheetName) {
+          return rule;
+        }
+      }
+    }
+
+    return null;
   }
 
   function collectFilterCandidates_(candidates, value) {
