@@ -8,6 +8,9 @@ var ActualSyncService = (function() {
     LOG_SHEET: 'CHANGE_LOG',
     CLEAN_KPLN_SHEET: 'CLEAN_KPLN',
     CLEAN_WI_INDEX_SHEET: 'CLEAN_WI_INDEX',
+    IATF_KPLN_SHEET: 'IATF_KPLN',
+    IATF_WI_INDEX_SHEET: 'IATF_WI_INDEX',
+    IATF_GAP_SHEET: 'IATF_GAP_REPORT',
     DEFAULT_PFMEA_SPREADSHEET_ID: '',
     DEFAULT_KPLN_SHEET_NAME: '',
     DEFAULT_WI_TEMPLATE_FOLDER_ID: '',
@@ -105,6 +108,51 @@ var ActualSyncService = (function() {
       'PFMEA_ISSUE_NOS',
       'SOURCE_ROW_COUNT',
       'LAST_GENERATED_AT'
+    ],
+    IATF_KPLN_HEADERS: [
+      'PROCESS_NO',
+      'STEP_TITLE',
+      'CHARACTERISTIC_REF',
+      'CONTROL_REQUIREMENT',
+      'UNIT',
+      'SPECIAL_CHARACTERISTIC',
+      'MEASUREMENT_TECHNIQUE',
+      'SAMPLE_SIZE',
+      'SAMPLING_FREQUENCY',
+      'CONTROL_METHOD',
+      'DOCUMENT_REFERENCE',
+      'REACTION_PLAN',
+      'PFMEA_SHEET',
+      'PFMEA_STEP_FILTER',
+      'PFMEA_ISSUE_NOS',
+      'PFMEA_FAILURE_MODES',
+      'PFMEA_FAILURE_CAUSES',
+      'PFMEA_PREVENTION_CONTROLS',
+      'PFMEA_DETECTION_CONTROLS',
+      'IATF_STATUS',
+      'GAP_NOTES',
+      'WI_LINK'
+    ],
+    IATF_WI_INDEX_HEADERS: [
+      'LINK_KEY',
+      'PROCESS_NO',
+      'STEP_TITLE',
+      'DOC_NAME',
+      'DOC_ID',
+      'DOC_URL',
+      'PFMEA_ISSUE_NOS',
+      'CONTROL_ROW_COUNT',
+      'OPEN_GAP_COUNT',
+      'LAST_GENERATED_AT'
+    ],
+    IATF_GAP_HEADERS: [
+      'LINK_KEY',
+      'PROCESS_NO',
+      'STEP_TITLE',
+      'AREA',
+      'SEVERITY',
+      'STATUS',
+      'DETAIL'
     ],
     LINK_STATUS: {
       APPROVED: 'APPROVED',
@@ -324,6 +372,173 @@ var ActualSyncService = (function() {
 
     writeCleanKplnSheet_(pfmeaSpreadsheet, cleanKplnRows, generatedAt);
     writeCleanWiIndexSheet_(cleanWiRows, generatedAt, cleanFolder);
+
+    if (logEntries.length) {
+      LogService.logEntries(logEntries, {
+        CHANGE_LOG_SHEET: CONSTANTS.LOG_SHEET,
+        CHANGE_LOG_HEADER_ROW: 1
+      });
+    }
+
+    return summary;
+  }
+
+  function generateIatfDrafts() {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    var kplnSheet = getSheet_(config.KPLN_SHEET_NAME);
+    var links = loadSyncLinks_(config);
+    if (!links.length) {
+      throw new Error('No active PFMEA links are available. Approve at least one row in SYNC_LINKS first.');
+    }
+
+    var generatedAt = SyncUtils.nowIso();
+    var outputFolder = ensureOutputFolder_(config, 'IATF Draft Outputs');
+    var existingIndex = loadIatfWiIndexRows_();
+    var pfmeaCache = {};
+    var iatfKplnRows = [];
+    var iatfWiRows = [];
+    var gapRows = [];
+    var logEntries = [];
+    var summary = {
+      ok: true,
+      processed: 0,
+      iatfKplnRows: 0,
+      iatfWiDocs: 0,
+      openGaps: 0,
+      errors: 0,
+      iatfKplnSheet: CONSTANTS.IATF_KPLN_SHEET,
+      iatfWiIndexSheet: CONSTANTS.IATF_WI_INDEX_SHEET,
+      iatfGapSheet: CONSTANTS.IATF_GAP_SHEET,
+      folderId: outputFolder.getId(),
+      folderUrl: outputFolder.getUrl()
+    };
+
+    links.forEach(function(link) {
+      summary.processed += 1;
+      try {
+        var pfmeaRows = getPfmeaRowsForLink_(link, pfmeaSpreadsheet, pfmeaCache);
+        if (!pfmeaRows.length) {
+          summary.errors += 1;
+          summary.ok = false;
+          gapRows.push([
+            link.LINK_KEY,
+            link.KPLN_PROCESS_NO,
+            link.KPLN_STEP_TITLE,
+            'PFMEA',
+            'Critical',
+            'BLOCKED',
+            'No PFMEA rows matched this approved link.'
+          ]);
+          return;
+        }
+
+        var selectionInspection = inspectPfmeaSelection_(link, pfmeaRows);
+        if (selectionInspection.error) {
+          summary.errors += 1;
+          summary.ok = false;
+          gapRows.push([
+            link.LINK_KEY,
+            link.KPLN_PROCESS_NO,
+            link.KPLN_STEP_TITLE,
+            'PFMEA',
+            'Critical',
+            'BLOCKED',
+            selectionInspection.error
+          ]);
+          return;
+        }
+
+        var payload = buildActualPayload_(pfmeaRows, link);
+        var cleanRecord = buildCleanRecord_(link, pfmeaRows, payload, generatedAt);
+        var kplnDetails = readKplnDetailRows_(kplnSheet, link);
+        var iatfContext = buildIatfContext_(link, cleanRecord, kplnDetails, generatedAt);
+        var existingIatfDoc = existingIndex[link.LINK_KEY] || {};
+        var iatfDoc = DocsService.createIatfWorkInstructionDocument({
+          DOC_ID: existingIatfDoc.DOC_ID,
+          TITLE: buildIatfWiTitle_(link, cleanRecord),
+          LINK_KEY: link.LINK_KEY,
+          PROCESS_NO: link.KPLN_PROCESS_NO,
+          STEP_TITLE: cleanRecord.stepTitle,
+          PFMEA_SHEET_NAME: link.PFMEA_SHEET_NAME,
+          PFMEA_ISSUE_NOS: cleanRecord.issueNoText,
+          SOURCE_ROW_COUNT: cleanRecord.sourceRowCount,
+          PROCESS_REQUIREMENT: cleanRecord.processRequirement,
+          CONTROL_INTENT: iatfContext.controlIntent,
+          DOCUMENT_REFERENCES: iatfContext.documentReferencesText,
+          CONTROL_ROWS: iatfContext.controlRowsForDoc,
+          FAILURE_ITEMS: cleanRecord.failureItems,
+          PREVENTION_ITEMS: cleanRecord.preventionItems,
+          DETECTION_ITEMS: cleanRecord.detectionItems,
+          REACTION_ITEMS: iatfContext.reactionItems,
+          GAP_ITEMS: iatfContext.wiGapItems,
+          LAST_GENERATED_AT: generatedAt
+        }, {
+          docId: existingIatfDoc.DOC_ID,
+          folderId: outputFolder.getId()
+        });
+
+        iatfContext.controlRows.forEach(function(controlRow) {
+          iatfKplnRows.push(buildIatfKplnRow_(link, cleanRecord, controlRow, iatfDoc.documentUrl));
+        });
+        iatfWiRows.push([
+          link.LINK_KEY,
+          link.KPLN_PROCESS_NO,
+          cleanRecord.stepTitle,
+          iatfDoc.documentName,
+          iatfDoc.docId,
+          iatfDoc.documentUrl,
+          cleanRecord.issueNoText,
+          String(iatfContext.controlRows.length),
+          String(iatfContext.totalGapCount),
+          generatedAt
+        ]);
+        iatfContext.gapRows.forEach(function(gapRow) {
+          gapRows.push(gapRow);
+        });
+
+        summary.iatfKplnRows += iatfContext.controlRows.length;
+        summary.iatfWiDocs += 1;
+        summary.openGaps += iatfContext.totalGapCount;
+        if (iatfContext.totalGapCount > 0) {
+          summary.ok = false;
+        }
+        logEntries.push(createActualLogEntry_(
+          'IATF_DRAFT',
+          link,
+          iatfDoc.created ? 'GENERATE_IATF_WI' : 'UPDATE_IATF_WI',
+          APP_CONSTANTS.STATUS.SUCCESS,
+          '',
+          {
+            docId: iatfDoc.docId,
+            docName: iatfDoc.documentName,
+            gapCount: iatfContext.totalGapCount
+          },
+          iatfDoc.created ? 'Created IATF-oriented WI draft.' : 'Updated IATF-oriented WI draft.'
+        ));
+      } catch (error) {
+        summary.errors += 1;
+        summary.ok = false;
+        gapRows.push([
+          link.LINK_KEY,
+          link.KPLN_PROCESS_NO,
+          link.KPLN_STEP_TITLE,
+          'Generator',
+          'Critical',
+          'BLOCKED',
+          error.message || String(error)
+        ]);
+      }
+    });
+
+    writeIatfKplnSheet_(pfmeaSpreadsheet, iatfKplnRows, generatedAt);
+    writeIatfWiIndexSheet_(iatfWiRows, generatedAt, outputFolder);
+    writeIatfGapSheet_(gapRows, generatedAt);
 
     if (logEntries.length) {
       LogService.logEntries(logEntries, {
@@ -707,6 +922,229 @@ var ActualSyncService = (function() {
       String(cleanRecord.sourceRowCount),
       generatedAt
     ];
+  }
+
+  function readKplnDetailRows_(sheet, link) {
+    var rowStart = toNumber_(link.KPLN_ROW_START);
+    var rowEnd = toNumber_(link.KPLN_ROW_END) || rowStart;
+    var rowCount = Math.max(rowEnd - rowStart + 1, 1);
+    var values = sheet.getRange(rowStart, 1, rowCount, 15).getDisplayValues();
+    var carried = {
+      processNo: '',
+      stepTitle: '',
+      unit: '',
+      measurementTechnique: '',
+      sampleSize: '',
+      samplingFrequency: '',
+      controlMethod: '',
+      documentReference: '',
+      reactionPlan: ''
+    };
+
+    return values.map(function(row, rowOffset) {
+      var detailRow = {
+        rowNumber: rowStart + rowOffset,
+        processNo: fillDownKplnDetail_(row[0], carried, 'processNo'),
+        stepTitle: fillDownKplnDetail_(row[1], carried, 'stepTitle'),
+        characteristicRef: SyncUtils.asString(row[2]),
+        requirement: SyncUtils.asString(row[3]),
+        unit: fillDownKplnDetail_(row[5], carried, 'unit'),
+        specialCharacteristic: SyncUtils.asString(row[7]),
+        measurementTechnique: fillDownKplnDetail_(row[9], carried, 'measurementTechnique'),
+        sampleSize: fillDownKplnDetail_(row[10], carried, 'sampleSize'),
+        samplingFrequency: fillDownKplnDetail_(row[11], carried, 'samplingFrequency'),
+        controlMethod: fillDownKplnDetail_(row[12], carried, 'controlMethod'),
+        documentReference: fillDownKplnDetail_(row[13], carried, 'documentReference'),
+        reactionPlan: fillDownKplnDetail_(row[14], carried, 'reactionPlan')
+      };
+      return detailRow;
+    }).filter(function(detailRow) {
+      return !!(
+        detailRow.processNo ||
+        detailRow.stepTitle ||
+        detailRow.characteristicRef ||
+        detailRow.requirement ||
+        detailRow.measurementTechnique ||
+        detailRow.sampleSize ||
+        detailRow.samplingFrequency ||
+        detailRow.controlMethod ||
+        detailRow.documentReference ||
+        detailRow.reactionPlan
+      );
+    });
+  }
+
+  function fillDownKplnDetail_(value, carried, key) {
+    var text = SyncUtils.asString(value);
+    if (text) {
+      carried[key] = text;
+      return text;
+    }
+    return carried[key] || '';
+  }
+
+  function buildIatfContext_(link, cleanRecord, kplnDetails, generatedAt) {
+    var controlRows = [];
+    var gapRows = [];
+    var wiGapItems = [];
+    var reactionItems = [];
+
+    if (!kplnDetails.length) {
+      gapRows.push([
+        link.LINK_KEY,
+        link.KPLN_PROCESS_NO,
+        cleanRecord.stepTitle,
+        'KPLN',
+        'Critical',
+        'BLOCKED',
+        'No KPLN detail rows were found for this link.'
+      ]);
+    }
+
+    kplnDetails.forEach(function(detailRow) {
+      var gapNotes = [];
+      var severity = 'READY';
+
+      if (!detailRow.measurementTechnique) {
+        gapNotes.push('Missing measurement technique');
+        severity = 'BLOCKED';
+      }
+      if (!detailRow.sampleSize) {
+        gapNotes.push('Missing sample size');
+        severity = 'BLOCKED';
+      }
+      if (!detailRow.samplingFrequency) {
+        gapNotes.push('Missing sampling frequency');
+        severity = 'BLOCKED';
+      }
+      if (!detailRow.reactionPlan) {
+        gapNotes.push('Generic reaction plan fallback used');
+        if (severity !== 'BLOCKED') {
+          severity = 'REVIEW';
+        }
+      }
+      if (!detailRow.documentReference) {
+        gapNotes.push('Missing supporting document reference');
+        if (severity === 'READY') {
+          severity = 'REVIEW';
+        }
+      }
+
+      var resolvedReactionPlan = detailRow.reactionPlan || buildGenericReactionPlan_(cleanRecord.stepTitle);
+      var controlRow = {
+        characteristicRef: detailRow.characteristicRef,
+        requirement: detailRow.requirement,
+        unit: detailRow.unit,
+        specialCharacteristic: detailRow.specialCharacteristic,
+        measurementTechnique: detailRow.measurementTechnique,
+        sampleSize: detailRow.sampleSize,
+        samplingFrequency: detailRow.samplingFrequency,
+        controlMethod: detailRow.controlMethod,
+        documentReference: detailRow.documentReference,
+        reactionPlan: resolvedReactionPlan,
+        status: severity,
+        gapNotes: gapNotes.join('; ')
+      };
+      controlRows.push(controlRow);
+
+      if (gapNotes.length) {
+        gapRows.push([
+          link.LINK_KEY,
+          link.KPLN_PROCESS_NO,
+          cleanRecord.stepTitle,
+          'CONTROL_PLAN',
+          severity === 'BLOCKED' ? 'Critical' : 'Major',
+          severity,
+          (detailRow.characteristicRef || detailRow.requirement || 'Step-level control') + ': ' + gapNotes.join('; ')
+        ]);
+      }
+
+      if (resolvedReactionPlan) {
+        reactionItems.push(resolvedReactionPlan);
+      }
+    });
+
+    wiGapItems = SyncUtils.unique([
+      'Add operator safety / PPE instructions that are not present in PFMEA or KPLN source.',
+      'Add tool, fixture, and setup sequence details before plant release.',
+      'Attach visual standards or photos for inspection points where applicable.'
+    ]);
+
+    if (!controlRows.length) {
+      wiGapItems.push('No control plan characteristic rows were available for this WI draft.');
+    }
+
+    return {
+      controlRows: controlRows,
+      controlRowsForDoc: controlRows,
+      controlIntent: buildIatfControlIntent_(cleanRecord),
+      documentReferencesText: buildDocumentReferencesText_(controlRows),
+      reactionItems: SyncUtils.unique(reactionItems),
+      wiGapItems: wiGapItems,
+      gapRows: gapRows,
+      totalGapCount: gapRows.length + wiGapItems.length
+    };
+  }
+
+  function buildIatfControlIntent_(cleanRecord) {
+    return [
+      'Control the process step "' + cleanRecord.stepTitle + '" against the linked PFMEA risks.',
+      'Use the defined measurement method, sample size, sample frequency, reaction plan, and supporting instruction before release.'
+    ].join(' ');
+  }
+
+  function buildDocumentReferencesText_(controlRows) {
+    var references = SyncUtils.unique(controlRows.map(function(controlRow) {
+      return controlRow.documentReference;
+    }).filter(function(value) {
+      return !!SyncUtils.asString(value);
+    }));
+    return references.length ? references.join('\n') : 'No supporting document reference was available in the source KPLN block.';
+  }
+
+  function buildGenericReactionPlan_(stepTitle) {
+    return [
+      'Stop the operation at "' + stepTitle + '".',
+      'Contain suspect product and identify the affected lot.',
+      'Inform the responsible quality and process owner.',
+      'Verify the last good part before restart.',
+      'Restart only after correction, verification, and approval.'
+    ].join(' ');
+  }
+
+  function buildIatfKplnRow_(link, cleanRecord, controlRow, documentUrl) {
+    return [
+      link.KPLN_PROCESS_NO,
+      cleanRecord.stepTitle,
+      controlRow.characteristicRef,
+      controlRow.requirement,
+      controlRow.unit,
+      controlRow.specialCharacteristic,
+      controlRow.measurementTechnique,
+      controlRow.sampleSize,
+      controlRow.samplingFrequency,
+      controlRow.controlMethod,
+      controlRow.documentReference,
+      controlRow.reactionPlan,
+      link.PFMEA_SHEET_NAME,
+      link.PFMEA_STEP_FILTER,
+      cleanRecord.issueNoText,
+      cleanRecord.failureItems.join('\n'),
+      cleanRecord.failureItems.map(function(item) {
+        var causeIndex = item.indexOf('Cause: ');
+        return causeIndex > -1 ? item.substring(causeIndex) : item;
+      }).join('\n'),
+      cleanRecord.preventionItems.join('\n'),
+      cleanRecord.detectionItems.join('\n'),
+      controlRow.status,
+      controlRow.gapNotes,
+      buildHyperlinkFormula_(documentUrl, 'Open WI')
+    ];
+  }
+
+  function buildIatfWiTitle_(link, cleanRecord) {
+    var baseName = 'IATF WI - ' + link.KPLN_PROCESS_NO + ' - ' + cleanRecord.stepTitle;
+    return SyncUtils.truncate(SyncUtils.sanitizeDriveName(baseName, 'IATF WI - ' + link.LINK_KEY), 180);
   }
 
   function buildFailureSummary_(pfmeaRows) {
@@ -2536,7 +2974,11 @@ var ActualSyncService = (function() {
   }
 
   function ensureCleanOutputFolder_(config) {
-    var folderName = SyncUtils.sanitizeDriveName(SpreadsheetApp.getActiveSpreadsheet().getName() + ' - PFMEA Clean Outputs', 'PFMEA Clean Outputs');
+    return ensureOutputFolder_(config, 'PFMEA Clean Outputs');
+  }
+
+  function ensureOutputFolder_(config, suffix) {
+    var folderName = SyncUtils.sanitizeDriveName(SpreadsheetApp.getActiveSpreadsheet().getName() + ' - ' + suffix, suffix);
     var parentFolder = null;
 
     if (SyncUtils.asString(config.WI_FOLDER_ID)) {
@@ -2589,6 +3031,147 @@ var ActualSyncService = (function() {
       return '';
     }
     return '=HYPERLINK("' + SyncUtils.asString(url).replace(/"/g, '""') + '","' + SyncUtils.asString(label || 'Open').replace(/"/g, '""') + '")';
+  }
+
+  function writeIatfKplnSheet_(pfmeaSpreadsheet, rows, generatedAt) {
+    var headers = CONSTANTS.IATF_KPLN_HEADERS;
+    var sheet = getOrCreateSheet_(CONSTANTS.IATF_KPLN_SHEET);
+    resetSheet_(sheet);
+    sheet.getRange(1, 1, 1, headers.length).merge();
+    sheet.getRange(1, 1).setValue('IATF-Oriented Control Plan Draft');
+    sheet.getRange(2, 1, 1, headers.length).merge();
+    sheet.getRange(2, 1).setValue('Built from approved PFMEA links and live KPLN block details on ' + generatedAt + ' | Source workbook: ' + pfmeaSpreadsheet.getName());
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setValues(rows);
+    }
+
+    sheet.setFrozenRows(4);
+    sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold').setHorizontalAlignment('left');
+    sheet.getRange(2, 1).setFontColor('#5f6368');
+    sheet.getRange(4, 1, 1, headers.length).setBackground('#173f5f').setFontColor('#ffffff').setFontWeight('bold');
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setWrap(true).setVerticalAlignment('top');
+      sheet.getRange(5, 1, rows.length, headers.length).applyRowBanding(SpreadsheetApp.BandingTheme.INDIGO);
+      sheet.getRange(4, 1, rows.length + 1, headers.length).createFilter();
+    }
+
+    setColumnWidths_(sheet, {
+      1: 90,
+      2: 220,
+      3: 110,
+      4: 220,
+      5: 70,
+      6: 120,
+      7: 180,
+      8: 120,
+      9: 140,
+      10: 220,
+      11: 160,
+      12: 220,
+      13: 90,
+      14: 160,
+      15: 120,
+      16: 220,
+      17: 220,
+      18: 220,
+      19: 220,
+      20: 100,
+      21: 220,
+      22: 90
+    });
+  }
+
+  function writeIatfWiIndexSheet_(rows, generatedAt, outputFolder) {
+    var headers = CONSTANTS.IATF_WI_INDEX_HEADERS;
+    var sheet = getOrCreateSheet_(CONSTANTS.IATF_WI_INDEX_SHEET);
+    resetSheet_(sheet);
+    sheet.getRange(1, 1, 1, headers.length).merge();
+    sheet.getRange(1, 1).setValue('IATF-Oriented WI Registry');
+    sheet.getRange(2, 1, 1, headers.length).merge();
+    sheet.getRange(2, 1).setValue('Generated on ' + generatedAt + ' | Folder: ' + outputFolder.getName() + ' | ' + outputFolder.getUrl());
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setValues(rows);
+    }
+
+    sheet.setFrozenRows(4);
+    sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold');
+    sheet.getRange(2, 1).setFontColor('#5f6368');
+    sheet.getRange(4, 1, 1, headers.length).setBackground('#206a5d').setFontColor('#ffffff').setFontWeight('bold');
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setWrap(true).setVerticalAlignment('top');
+      sheet.getRange(5, 1, rows.length, headers.length).applyRowBanding(SpreadsheetApp.BandingTheme.GREEN);
+      sheet.getRange(4, 1, rows.length + 1, headers.length).createFilter();
+    }
+
+    setColumnWidths_(sheet, {
+      1: 110,
+      2: 90,
+      3: 240,
+      4: 260,
+      5: 240,
+      6: 260,
+      7: 120,
+      8: 110,
+      9: 110,
+      10: 180
+    });
+  }
+
+  function writeIatfGapSheet_(rows, generatedAt) {
+    var headers = CONSTANTS.IATF_GAP_HEADERS;
+    var sheet = getOrCreateSheet_(CONSTANTS.IATF_GAP_SHEET);
+    resetSheet_(sheet);
+    sheet.getRange(1, 1, 1, headers.length).merge();
+    sheet.getRange(1, 1).setValue('IATF Gap Report');
+    sheet.getRange(2, 1, 1, headers.length).merge();
+    sheet.getRange(2, 1).setValue('Open gaps detected on ' + generatedAt + '. These items require plant or customer-specific completion before release.');
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setValues(rows);
+    }
+
+    sheet.setFrozenRows(4);
+    sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold');
+    sheet.getRange(2, 1).setFontColor('#5f6368');
+    sheet.getRange(4, 1, 1, headers.length).setBackground('#8b1e3f').setFontColor('#ffffff').setFontWeight('bold');
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setWrap(true).setVerticalAlignment('top');
+      sheet.getRange(5, 1, rows.length, headers.length).applyRowBanding(SpreadsheetApp.BandingTheme.PINK);
+      sheet.getRange(4, 1, rows.length + 1, headers.length).createFilter();
+    }
+
+    setColumnWidths_(sheet, {
+      1: 110,
+      2: 90,
+      3: 220,
+      4: 110,
+      5: 90,
+      6: 90,
+      7: 320
+    });
+  }
+
+  function loadIatfWiIndexRows_() {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONSTANTS.IATF_WI_INDEX_SHEET);
+    var map = {};
+    if (!sheet || sheet.getLastRow() <= 4) {
+      return map;
+    }
+    var rows = sheet.getRange(5, 1, sheet.getLastRow() - 4, CONSTANTS.IATF_WI_INDEX_HEADERS.length).getDisplayValues();
+    rows.forEach(function(row) {
+      var linkKey = SyncUtils.asString(row[0]);
+      if (linkKey) {
+        map[linkKey] = {
+          LINK_KEY: linkKey,
+          DOC_NAME: SyncUtils.asString(row[3]),
+          DOC_ID: SyncUtils.asString(row[4]),
+          DOC_URL: SyncUtils.asString(row[5])
+        };
+      }
+    });
+    return map;
   }
 
   function getOrCreateSheet_(sheetName) {
@@ -2662,6 +3245,7 @@ var ActualSyncService = (function() {
     previewSync: previewSync,
     runSync: runSync,
     generateCleanDeliverables: generateCleanDeliverables,
+    generateIatfDrafts: generateIatfDrafts,
     debugLinkSelection: debugLinkSelection,
     debugPfmeaSheet: debugPfmeaSheet,
     debugPfmeaWorkbookSummary: debugPfmeaWorkbookSummary,

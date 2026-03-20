@@ -9,6 +9,7 @@ var UIService = (function() {
       .addItem('Preview Actual Sync', 'previewActualSync')
       .addItem('Run Actual Sync', 'runActualSync')
       .addItem('Generate Clean KPLN + WI', 'generateCleanDeliverables')
+      .addItem('Generate IATF Draft KPLN + WI', 'generateIatfDrafts')
       .addSeparator()
       .addItem('Open Actual Config', 'openActualConfig')
       .addItem('Open Actual Links', 'openActualLinks')
@@ -241,6 +242,19 @@ var UIService = (function() {
     });
   }
 
+  function generateIatfDraftsAction() {
+    return runActualAction_(function() {
+      var result = ActualSyncService.generateIatfDrafts();
+      var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+      var draftSheet = spreadsheet.getSheetByName(result.iatfKplnSheet);
+      if (draftSheet) {
+        spreadsheet.setActiveSheet(draftSheet);
+      }
+      showIatfDraftSummary_(result);
+      return result;
+    });
+  }
+
   function openActualConfigAction() {
     ActualSyncService.openConfig();
   }
@@ -302,6 +316,23 @@ var UIService = (function() {
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
   }
 
+  function showIatfDraftSummary_(result) {
+    var ui = SpreadsheetApp.getUi();
+    var message = [
+      result.ok ? 'IATF-oriented drafts generated.' : 'IATF-oriented drafts generated with open gaps.',
+      'Links processed: ' + result.processed,
+      'IATF KPLN rows: ' + result.iatfKplnRows,
+      'IATF WI docs: ' + result.iatfWiDocs,
+      'Open gaps: ' + result.openGaps,
+      'Errors: ' + result.errors,
+      'KPLN sheet: ' + result.iatfKplnSheet,
+      'WI index sheet: ' + result.iatfWiIndexSheet,
+      'Gap sheet: ' + result.iatfGapSheet,
+      'Output folder: ' + result.folderUrl
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+  }
+
   function runActualAction_(action) {
     try {
       return action();
@@ -327,6 +358,7 @@ var UIService = (function() {
     previewActualSyncAction: previewActualSyncAction,
     runActualSyncAction: runActualSyncAction,
     generateCleanDeliverablesAction: generateCleanDeliverablesAction,
+    generateIatfDraftsAction: generateIatfDraftsAction,
     openActualConfigAction: openActualConfigAction,
     openActualLinksAction: openActualLinksAction,
     openActualTemplatesAction: openActualTemplatesAction

@@ -806,11 +806,138 @@ var DocsService = (function() {
     });
   }
 
+  function createIatfWorkInstructionDocument(recordValues, options) {
+    var normalizedOptions = options || {};
+    var requestedDocId = SyncUtils.asString(normalizedOptions.docId || recordValues.DOC_ID);
+    var document;
+    var created = false;
+
+    if (requestedDocId && isDocumentAccessible_(requestedDocId)) {
+      document = DocumentApp.openById(requestedDocId);
+    } else {
+      document = DocumentApp.create(recordValues.TITLE || 'IATF Work Instruction');
+      created = true;
+    }
+
+    var file = DriveApp.getFileById(document.getId());
+    file.setName(recordValues.TITLE || file.getName());
+
+    if (normalizedOptions.folderId) {
+      try {
+        file.moveTo(DriveApp.getFolderById(normalizedOptions.folderId));
+      } catch (ignored) {
+        // Keep the document where it was created if the move fails.
+      }
+    }
+
+    renderIatfWorkInstruction_(document, recordValues);
+    document.saveAndClose();
+
+    return {
+      docId: document.getId(),
+      documentName: file.getName(),
+      documentUrl: 'https://docs.google.com/document/d/' + document.getId() + '/edit',
+      created: created
+    };
+  }
+
+  function renderIatfWorkInstruction_(document, recordValues) {
+    var body = document.getBody();
+    body.clear();
+
+    var title = body.appendParagraph(recordValues.TITLE || 'IATF Work Instruction Draft');
+    title.setHeading(DocumentApp.ParagraphHeading.TITLE);
+
+    var noteText = 'IATF-oriented draft built from PFMEA and Control Plan content. Plant approval, customer-specific review, and operator validation are still required before release.';
+    var note = body.appendParagraph(noteText);
+    note.editAsText().setItalic(0, noteText.length - 1, true).setForegroundColor(0, noteText.length - 1, '#5f6368');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Document Context');
+    appendLabeledParagraph_(body, 'Link Key', recordValues.LINK_KEY);
+    appendLabeledParagraph_(body, 'Operation No', recordValues.PROCESS_NO);
+    appendLabeledParagraph_(body, 'Step Title', recordValues.STEP_TITLE);
+    appendLabeledParagraph_(body, 'PFMEA Sheet', recordValues.PFMEA_SHEET_NAME);
+    appendLabeledParagraph_(body, 'PFMEA Issue Nos', recordValues.PFMEA_ISSUE_NOS);
+    appendLabeledParagraph_(body, 'Source Row Count', String(recordValues.SOURCE_ROW_COUNT || '0'));
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Standardized Work Summary');
+    appendLabeledParagraph_(body, 'Process Requirement', recordValues.PROCESS_REQUIREMENT);
+    appendLabeledParagraph_(body, 'Control Intent', recordValues.CONTROL_INTENT);
+    appendLabeledParagraph_(body, 'Required References', recordValues.DOCUMENT_REFERENCES);
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Control Plan Requirements');
+    appendControlPlanTable_(body, recordValues.CONTROL_ROWS || []);
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'PFMEA Risk Rationale');
+    appendBulletList_(body, recordValues.FAILURE_ITEMS, 'No failure risks were parsed from the selected PFMEA rows.');
+    appendSubheading_(body, 'Prevention Controls');
+    appendBulletList_(body, recordValues.PREVENTION_ITEMS, 'No prevention controls were provided in the PFMEA selection.');
+    appendSubheading_(body, 'Detection Controls');
+    appendBulletList_(body, recordValues.DETECTION_ITEMS, 'No detection controls were provided in the PFMEA selection.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Reaction and Escalation');
+    appendBulletList_(body, recordValues.REACTION_ITEMS, 'No reaction plan was provided; plant-specific escalation must be added before release.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Release Gaps To Close');
+    appendBulletList_(body, recordValues.GAP_ITEMS, 'No open content gaps were detected from the available PFMEA and KPLN data.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Generated At');
+    body.appendParagraph(SyncUtils.asString(recordValues.LAST_GENERATED_AT));
+  }
+
+  function appendControlPlanTable_(body, controlRows) {
+    var tableValues = [[
+      'Char / Area',
+      'Requirement',
+      'Method',
+      'Sample Size',
+      'Frequency',
+      'Reaction'
+    ]];
+
+    if (controlRows && controlRows.length) {
+      controlRows.forEach(function(row) {
+        tableValues.push([
+          SyncUtils.asString(row.characteristicRef),
+          SyncUtils.asString(row.requirement),
+          SyncUtils.asString(row.measurementTechnique),
+          SyncUtils.asString(row.sampleSize),
+          SyncUtils.asString(row.samplingFrequency),
+          SyncUtils.asString(row.reactionPlan)
+        ]);
+      });
+    } else {
+      tableValues.push([
+        'Missing',
+        'No KPLN characteristic rows were available for this step.',
+        'Add',
+        'Add',
+        'Add',
+        'Add'
+      ]);
+    }
+
+    var table = body.appendTable(tableValues);
+    if (table.getNumRows() > 0) {
+      for (var cellIndex = 0; cellIndex < table.getRow(0).getNumCells(); cellIndex += 1) {
+        table.getRow(0).getCell(cellIndex).editAsText().setBold(true);
+      }
+    }
+  }
+
   return {
     syncStepSection: syncStepSection,
     ensureWorkInstructionDocument: ensureWorkInstructionDocument,
     ensureGoogleDocTemplate: ensureGoogleDocTemplate,
     isDocumentAccessible: isDocumentAccessible,
-    createCleanWorkInstructionDocument: createCleanWorkInstructionDocument
+    createCleanWorkInstructionDocument: createCleanWorkInstructionDocument,
+    createIatfWorkInstructionDocument: createIatfWorkInstructionDocument
   };
 })();

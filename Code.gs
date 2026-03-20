@@ -46,6 +46,10 @@ function generateCleanDeliverables() {
   return UIService.generateCleanDeliverablesAction();
 }
 
+function generateIatfDrafts() {
+  return UIService.generateIatfDraftsAction();
+}
+
 function openActualConfig() {
   return UIService.openActualConfigAction();
 }
@@ -97,6 +101,12 @@ function remoteRunActualSync() {
 function remoteGenerateCleanDeliverables() {
   return runRemoteActualAction_(function() {
     return ActualSyncService.generateCleanDeliverables();
+  });
+}
+
+function remoteGenerateIatfDrafts() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.generateIatfDrafts();
   });
 }
 
@@ -200,10 +210,14 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.generateCleanDeliverables();
     });
+  } else if (action === 'generateIatf') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.generateIatfDrafts();
+    });
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, debugKpln, refreshTemplates, validate, preview, run, or generateClean.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, debugKpln, refreshTemplates, validate, preview, run, generateClean, or generateIatf.'
     };
   }
 
