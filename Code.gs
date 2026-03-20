@@ -138,6 +138,10 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshLinks();
     });
+  } else if (action === 'inspectLink') {
+    result = runRemoteActualAction_(function() {
+      return inspectActualLink_(request.linkKey || 'LINK-10.1');
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -153,7 +157,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, refreshTemplates, validate, or preview.'
+      error: 'Unsupported action. Use refresh, inspectLink, refreshTemplates, validate, or preview.'
     };
   }
 
@@ -170,6 +174,7 @@ function parseRemoteWebRequest_(e) {
   var request = {};
   if (e && e.parameter) {
     request.action = e.parameter.action || '';
+    request.linkKey = e.parameter.linkKey || '';
   }
   if (e && e.postData && e.postData.contents) {
     try {
@@ -177,9 +182,34 @@ function parseRemoteWebRequest_(e) {
       if (body && body.action) {
         request.action = body.action;
       }
+      if (body && body.linkKey) {
+        request.linkKey = body.linkKey;
+      }
     } catch (ignored) {
       // Fall back to query parameters.
     }
   }
   return request;
+}
+
+function inspectActualLink_(linkKey) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SYNC_LINKS');
+  if (!sheet) {
+    throw new Error('SYNC_LINKS sheet was not found.');
+  }
+  var values = sheet.getDataRange().getDisplayValues();
+  if (values.length <= 1) {
+    throw new Error('SYNC_LINKS has no data rows.');
+  }
+  var headers = values[0];
+  for (var index = 1; index < values.length; index += 1) {
+    if (values[index][2] === linkKey) {
+      var row = {};
+      headers.forEach(function(header, headerIndex) {
+        row[header] = values[index][headerIndex];
+      });
+      return row;
+    }
+  }
+  throw new Error('Link not found: ' + linkKey);
 }
