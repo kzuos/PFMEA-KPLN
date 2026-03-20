@@ -565,15 +565,31 @@ var ActualSyncService = (function() {
     if (!filterTerms.length) {
       return rows;
     }
+
+    var stepScopedMatches = rows.filter(function(row) {
+      var stepHaystack = normalizeText_([
+        row.PROCESS_STEP,
+        row.WORK_ELEMENT_4M,
+        row.FAILURE_MODE,
+        row.FAILURE_CAUSE
+      ].join(' '));
+      return filterTerms.some(function(filterText) {
+        return stepHaystack.indexOf(filterText) > -1;
+      });
+    });
+    if (stepScopedMatches.length) {
+      return stepScopedMatches;
+    }
+
     return rows.filter(function(row) {
-      var haystack = normalizeText_([
+      var fallbackHaystack = normalizeText_([
         row.PROCESS_ITEM,
         row.PROCESS_STEP,
         row.FAILURE_MODE,
         row.FAILURE_CAUSE
       ].join(' '));
       return filterTerms.some(function(filterText) {
-        return haystack.indexOf(filterText) > -1;
+        return fallbackHaystack.indexOf(filterText) > -1;
       });
     });
   }
