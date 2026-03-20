@@ -383,6 +383,20 @@ var DocsService = (function() {
       removeEnd += insertedLength;
     }
 
+    removeBodyRange_(body, removeStart, removeEnd);
+  }
+
+  function removeBodyRange_(body, removeStart, removeEnd) {
+    if (removeStart < 0 || removeEnd < removeStart) {
+      return;
+    }
+
+    // Google Docs rejects removing the final body paragraph, so keep a trailing
+    // placeholder paragraph whenever a managed section currently sits at the end.
+    if (removeEnd >= body.getNumChildren() - 1) {
+      body.appendParagraph('');
+    }
+
     for (var removeIndex = removeEnd; removeIndex >= removeStart; removeIndex -= 1) {
       body.removeChild(body.getChild(removeIndex));
     }
