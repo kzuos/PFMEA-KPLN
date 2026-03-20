@@ -428,7 +428,7 @@ var ActualSyncService = (function() {
 
   function buildActualPayload_(pfmeaRows, link) {
     return {
-      stepTitle: chooseDominantValue_(pfmeaRows, 'PROCESS_STEP') || link.KPLN_STEP_TITLE,
+      stepTitle: link.KPLN_STEP_TITLE || chooseDominantValue_(pfmeaRows, 'PROCESS_STEP'),
       processDescription: chooseDominantValue_(pfmeaRows, 'PROCESS_ITEM') || link.PFMEA_PROCESS_NAME,
       failureSummary: buildFailureSummary_(pfmeaRows),
       productCharacteristics: joinUniqueField_(pfmeaRows, 'PRODUCT_CHARACTERISTIC', ', '),
