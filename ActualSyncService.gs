@@ -659,6 +659,7 @@ var ActualSyncService = (function() {
       distinctIssueNos: aggregateUniqueField_(rows, 'ISSUE_NO').length,
       distinctProcessItems: aggregateUniqueField_(rows, 'PROCESS_ITEM').slice(0, 20),
       distinctProcessSteps: aggregateUniqueField_(rows, 'PROCESS_STEP').slice(0, 20),
+      rawSampleRows: buildRawPfmeaRowDebug_(values, issueHeaderRow, limit),
       sampleRows: rows.slice(0, limit).map(function(row) {
         return {
           SOURCE_ROW: row.SOURCE_ROW,
@@ -682,6 +683,28 @@ var ActualSyncService = (function() {
       };
     });
     return debug;
+  }
+
+  function buildRawPfmeaRowDebug_(values, issueHeaderRow, limit) {
+    var rows = [];
+    for (var rowIndex = issueHeaderRow + 2; rowIndex < values.length && rows.length < limit; rowIndex += 1) {
+      var row = values[rowIndex];
+      var nonEmptyCells = [];
+      for (var cellIndex = 0; cellIndex < row.length; cellIndex += 1) {
+        var value = SyncUtils.asString(row[cellIndex]);
+        if (value) {
+          nonEmptyCells.push({
+            index: cellIndex,
+            value: value
+          });
+        }
+      }
+      rows.push({
+        SOURCE_ROW: rowIndex + 1,
+        nonEmptyCells: nonEmptyCells
+      });
+    }
+    return rows;
   }
 
   function parsePfmeaSheet_(sheet) {
