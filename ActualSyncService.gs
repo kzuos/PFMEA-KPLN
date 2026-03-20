@@ -777,21 +777,50 @@ var ActualSyncService = (function() {
     for (var dataRowIndex = issueHeaderRow + 2; dataRowIndex < values.length; dataRowIndex += 1) {
       var row = values[dataRowIndex];
       var issueNo = SyncUtils.asString(row[indexMap.ISSUE_NO]);
-      var processItem = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_ITEM), carried, 'PROCESS_ITEM');
-      var processStep = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_STEP), carried, 'PROCESS_STEP');
-      var workElement = fillDownValue_(getCellByIndex_(row, indexMap.WORK_ELEMENT_4M), carried, 'WORK_ELEMENT_4M');
-      var failureMode = getCellByIndex_(row, indexMap.FAILURE_MODE);
-      var prevention = getCellByIndex_(row, indexMap.PREVENTION_CONTROLS);
-      var detection = getCellByIndex_(row, indexMap.DETECTION_CONTROLS);
-      var specialCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.SPECIAL_CHARACTERISTIC), carried, 'SPECIAL_CHARACTERISTIC');
-      var productCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.PRODUCT_CHARACTERISTIC), carried, 'PRODUCT_CHARACTERISTIC');
-      var processCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_CHARACTERISTIC), carried, 'PROCESS_CHARACTERISTIC');
-      var specificationTolerance = fillDownValue_(getCellByIndex_(row, indexMap.SPECIFICATION_TOLERANCE), carried, 'SPECIFICATION_TOLERANCE');
-      var reactionPlan = fillDownValue_(getCellByIndex_(row, indexMap.REACTION_PLAN), carried, 'REACTION_PLAN');
+      var processItemRaw = getCellByIndex_(row, indexMap.PROCESS_ITEM);
+      var processStepRaw = getCellByIndex_(row, indexMap.PROCESS_STEP);
+      var workElementRaw = getCellByIndex_(row, indexMap.WORK_ELEMENT_4M);
+      var failureEffectRaw = getCellByIndex_(row, indexMap.FAILURE_EFFECT);
+      var failureModeRaw = getCellByIndex_(row, indexMap.FAILURE_MODE);
+      var failureCauseRaw = getCellByIndex_(row, indexMap.FAILURE_CAUSE);
+      var preventionRaw = getCellByIndex_(row, indexMap.PREVENTION_CONTROLS);
+      var detectionRaw = getCellByIndex_(row, indexMap.DETECTION_CONTROLS);
+      var specialCharacteristicRaw = getCellByIndex_(row, indexMap.SPECIAL_CHARACTERISTIC);
+      var productCharacteristicRaw = getCellByIndex_(row, indexMap.PRODUCT_CHARACTERISTIC);
+      var processCharacteristicRaw = getCellByIndex_(row, indexMap.PROCESS_CHARACTERISTIC);
+      var specificationToleranceRaw = getCellByIndex_(row, indexMap.SPECIFICATION_TOLERANCE);
+      var reactionPlanRaw = getCellByIndex_(row, indexMap.REACTION_PLAN);
 
-      if (!issueNo && !processItem && !processStep && !failureMode && !prevention && !detection) {
+      var hasSubstantiveContent = !!(
+        processItemRaw ||
+        processStepRaw ||
+        workElementRaw ||
+        failureEffectRaw ||
+        failureModeRaw ||
+        failureCauseRaw ||
+        preventionRaw ||
+        detectionRaw ||
+        specialCharacteristicRaw ||
+        productCharacteristicRaw ||
+        processCharacteristicRaw ||
+        specificationToleranceRaw ||
+        reactionPlanRaw
+      );
+      if (!issueNo || !hasSubstantiveContent) {
         continue;
       }
+
+      var processItem = fillDownValue_(processItemRaw, carried, 'PROCESS_ITEM');
+      var processStep = fillDownValue_(processStepRaw, carried, 'PROCESS_STEP');
+      var workElement = fillDownValue_(workElementRaw, carried, 'WORK_ELEMENT_4M');
+      var failureMode = failureModeRaw;
+      var prevention = preventionRaw;
+      var detection = detectionRaw;
+      var specialCharacteristic = fillDownValue_(specialCharacteristicRaw, carried, 'SPECIAL_CHARACTERISTIC');
+      var productCharacteristic = fillDownValue_(productCharacteristicRaw, carried, 'PRODUCT_CHARACTERISTIC');
+      var processCharacteristic = fillDownValue_(processCharacteristicRaw, carried, 'PROCESS_CHARACTERISTIC');
+      var specificationTolerance = fillDownValue_(specificationToleranceRaw, carried, 'SPECIFICATION_TOLERANCE');
+      var reactionPlan = fillDownValue_(reactionPlanRaw, carried, 'REACTION_PLAN');
 
       records.push({
         PFMEA_SHEET_NAME: sheet.getName(),
@@ -801,8 +830,8 @@ var ActualSyncService = (function() {
         PROCESS_STEP: processStep,
         WORK_ELEMENT_4M: workElement,
         FAILURE_MODE: failureMode,
-        FAILURE_EFFECT: getCellByIndex_(row, indexMap.FAILURE_EFFECT),
-        FAILURE_CAUSE: getCellByIndex_(row, indexMap.FAILURE_CAUSE),
+        FAILURE_EFFECT: failureEffectRaw,
+        FAILURE_CAUSE: failureCauseRaw,
         PREVENTION_CONTROLS: prevention,
         DETECTION_CONTROLS: detection,
         SPECIAL_CHARACTERISTIC: specialCharacteristic,
