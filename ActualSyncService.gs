@@ -617,14 +617,30 @@ var ActualSyncService = (function() {
     };
 
     var records = [];
+    var carried = {
+      PROCESS_ITEM: '',
+      PROCESS_STEP: '',
+      WORK_ELEMENT_4M: '',
+      SPECIAL_CHARACTERISTIC: '',
+      PRODUCT_CHARACTERISTIC: '',
+      PROCESS_CHARACTERISTIC: '',
+      SPECIFICATION_TOLERANCE: '',
+      REACTION_PLAN: ''
+    };
     for (var dataRowIndex = issueHeaderRow + 2; dataRowIndex < values.length; dataRowIndex += 1) {
       var row = values[dataRowIndex];
       var issueNo = SyncUtils.asString(row[indexMap.ISSUE_NO]);
-      var processItem = getCellByIndex_(row, indexMap.PROCESS_ITEM);
-      var processStep = getCellByIndex_(row, indexMap.PROCESS_STEP);
+      var processItem = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_ITEM), carried, 'PROCESS_ITEM');
+      var processStep = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_STEP), carried, 'PROCESS_STEP');
+      var workElement = fillDownValue_(getCellByIndex_(row, indexMap.WORK_ELEMENT_4M), carried, 'WORK_ELEMENT_4M');
       var failureMode = getCellByIndex_(row, indexMap.FAILURE_MODE);
       var prevention = getCellByIndex_(row, indexMap.PREVENTION_CONTROLS);
       var detection = getCellByIndex_(row, indexMap.DETECTION_CONTROLS);
+      var specialCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.SPECIAL_CHARACTERISTIC), carried, 'SPECIAL_CHARACTERISTIC');
+      var productCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.PRODUCT_CHARACTERISTIC), carried, 'PRODUCT_CHARACTERISTIC');
+      var processCharacteristic = fillDownValue_(getCellByIndex_(row, indexMap.PROCESS_CHARACTERISTIC), carried, 'PROCESS_CHARACTERISTIC');
+      var specificationTolerance = fillDownValue_(getCellByIndex_(row, indexMap.SPECIFICATION_TOLERANCE), carried, 'SPECIFICATION_TOLERANCE');
+      var reactionPlan = fillDownValue_(getCellByIndex_(row, indexMap.REACTION_PLAN), carried, 'REACTION_PLAN');
 
       if (!issueNo && !processItem && !processStep && !failureMode && !prevention && !detection) {
         continue;
@@ -636,17 +652,17 @@ var ActualSyncService = (function() {
         ISSUE_NO: issueNo,
         PROCESS_ITEM: processItem,
         PROCESS_STEP: processStep,
-        WORK_ELEMENT_4M: getCellByIndex_(row, indexMap.WORK_ELEMENT_4M),
+        WORK_ELEMENT_4M: workElement,
         FAILURE_MODE: failureMode,
         FAILURE_EFFECT: getCellByIndex_(row, indexMap.FAILURE_EFFECT),
         FAILURE_CAUSE: getCellByIndex_(row, indexMap.FAILURE_CAUSE),
         PREVENTION_CONTROLS: prevention,
         DETECTION_CONTROLS: detection,
-        SPECIAL_CHARACTERISTIC: getCellByIndex_(row, indexMap.SPECIAL_CHARACTERISTIC),
-        PRODUCT_CHARACTERISTIC: getCellByIndex_(row, indexMap.PRODUCT_CHARACTERISTIC),
-        PROCESS_CHARACTERISTIC: getCellByIndex_(row, indexMap.PROCESS_CHARACTERISTIC),
-        SPECIFICATION_TOLERANCE: getCellByIndex_(row, indexMap.SPECIFICATION_TOLERANCE),
-        REACTION_PLAN: getCellByIndex_(row, indexMap.REACTION_PLAN),
+        SPECIAL_CHARACTERISTIC: specialCharacteristic,
+        PRODUCT_CHARACTERISTIC: productCharacteristic,
+        PROCESS_CHARACTERISTIC: processCharacteristic,
+        SPECIFICATION_TOLERANCE: specificationTolerance,
+        REACTION_PLAN: reactionPlan,
         PFMEA_AP: getCellByIndex_(row, indexMap.PFMEA_AP)
       });
     }
@@ -681,6 +697,15 @@ var ActualSyncService = (function() {
 
   function getCellByIndex_(row, index) {
     return index > -1 ? SyncUtils.asString(row[index]) : '';
+  }
+
+  function fillDownValue_(value, carried, key) {
+    var text = SyncUtils.asString(value);
+    if (text) {
+      carried[key] = text;
+      return text;
+    }
+    return carried[key] || '';
   }
 
   function scanKplnBlocks_(config) {
