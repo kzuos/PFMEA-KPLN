@@ -946,7 +946,7 @@ var ActualSyncService = (function() {
       reactionPlan: ''
     };
 
-    return values.map(function(row, rowOffset) {
+    var detailRows = values.map(function(row, rowOffset) {
       var detailRow = {
         rowNumber: rowStart + rowOffset,
         processNo: fillDownKplnDetail_(row[0], carried, 'processNo'),
@@ -977,6 +977,17 @@ var ActualSyncService = (function() {
         detailRow.reactionPlan
       );
     });
+
+    var derivedReactionPlan = deriveNearbyKplnReactionPlan_(sheet, link, detailRows);
+    if (derivedReactionPlan) {
+      detailRows.forEach(function(detailRow) {
+        if (!detailRow.reactionPlan) {
+          detailRow.reactionPlan = derivedReactionPlan;
+        }
+      });
+    }
+
+    return detailRows;
   }
 
   function fillDownKplnDetail_(value, carried, key) {
@@ -986,6 +997,126 @@ var ActualSyncService = (function() {
       return text;
     }
     return carried[key] || '';
+  }
+
+  function deriveNearbyKplnReactionPlan_(sheet, link, detailRows) {
+    if (!detailRows.length || detailRows.every(function(detailRow) {
+      return !!detailRow.reactionPlan;
+    })) {
+      return '';
+    }
+
+    var rowStart = toNumber_(link.KPLN_ROW_START);
+    var rowEnd = toNumber_(link.KPLN_ROW_END) || rowStart;
+    var scanStart = Math.max(1, rowStart - 6);
+    var scanEnd = Math.min(sheet.getLastRow(), rowEnd + 6);
+    var scanCount = Math.max(scanEnd - scanStart + 1, 1);
+    var values = sheet.getRange(scanStart, 1, scanCount, 15).getDisplayValues();
+    var processFamily = normalizeKplnProcessFamily_(link.KPLN_PROCESS_NO || (detailRows[0] && detailRows[0].processNo));
+    var stepTokens = tokenizeKplnTitle_(link.KPLN_STEP_TITLE || (detailRows[0] && detailRows[0].stepTitle));
+
+    var candidates = values.map(function(row, rowOffset) {
+      var rowNumber = scanStart + rowOffset;
+      var reactionPlan = SyncUtils.asString(row[14]);
+      var processNo = SyncUtils.asString(row[0]);
+      var stepTitle = SyncUtils.asString(row[1]);
+      if (rowNumber >= rowStart && rowNumber <= rowEnd) {
+        return null;
+      }
+      if (!reactionPlan || reactionPlan === '-') {
+        return null;
+      }
+
+      var familyScore = normalizeKplnProcessFamily_(processNo) === processFamily ? 2 : 0;
+      var titleScore = countSharedTokens_(stepTokens, tokenizeKplnTitle_(stepTitle));
+      if (!familyScore && !titleScore) {
+        return null;
+      }
+
+      return {
+        reactionPlan: reactionPlan,
+        distance: Math.min(Math.abs(rowNumber - rowStart), Math.abs(rowNumber - rowEnd)),
+        familyScore: familyScore,
+        titleScore: titleScore
+      };
+    }).filter(function(candidate) {
+      return !!candidate;
+    });
+
+    if (!candidates.length) {
+      return '';
+    }
+
+    candidates.sort(function(left, right) {
+      if (right.familyScore !== left.familyScore) {
+        return right.familyScore - left.familyScore;
+      }
+      if (right.titleScore !== left.titleScore) {
+        return right.titleScore - left.titleScore;
+      }
+      return left.distance - right.distance;
+    });
+
+    return mergeNearbyReactionPlans_(candidates.slice(0, 2).map(function(candidate) {
+      return candidate.reactionPlan;
+    }));
+  }
+
+  function normalizeKplnProcessFamily_(processNo) {
+    var text = SyncUtils.asString(processNo);
+    if (!text) {
+      return '';
+    }
+    return text.split('.')[0];
+  }
+
+  function tokenizeKplnTitle_(value) {
+    return SyncUtils.asString(value)
+      .toLowerCase()
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+/g, ' ')
+      .split(/\s+/)
+      .filter(function(token) {
+        return token && token.length > 2;
+      });
+  }
+
+  function countSharedTokens_(leftTokens, rightTokens) {
+    if (!leftTokens.length || !rightTokens.length) {
+      return 0;
+    }
+
+    var rightMap = {};
+    rightTokens.forEach(function(token) {
+      rightMap[token] = true;
+    });
+
+    var shared = 0;
+    leftTokens.forEach(function(token) {
+      if (rightMap[token]) {
+        shared += 1;
+      }
+    });
+    return shared;
+  }
+
+  function mergeNearbyReactionPlans_(plans) {
+    var bulletLines = [];
+    plans.forEach(function(plan) {
+      SyncUtils.asString(plan).split(/\r?\n+/).forEach(function(line) {
+        var normalized = line
+          .replace(/^[\s*•-]+/, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (normalized) {
+          bulletLines.push(normalized);
+        }
+      });
+    });
+
+    return SyncUtils.unique(bulletLines).map(function(line) {
+      return '* ' + line;
+    }).join('\n');
   }
 
   function buildIatfContext_(link, cleanRecord, kplnDetails, generatedAt) {
@@ -1438,6 +1569,11 @@ var ActualSyncService = (function() {
     ensureHelperSheets_();
     writeConfigDefaults_();
 
+    var normalizedLinkKey = SyncUtils.asString(linkKey);
+    if (normalizedLinkKey.indexOf('IATF:') === 0) {
+      return debugIatfLink(normalizedLinkKey.substring(5));
+    }
+
     var config = getConfig_();
     assertActualConfigurationReady_(config);
 
@@ -1470,6 +1606,88 @@ var ActualSyncService = (function() {
           values: row
         };
       })
+    };
+  }
+
+  function debugIatfGaps(limit) {
+    ensureHelperSheets_();
+
+    var requestedLimit = parseInt(limit, 10) || 20;
+    var rowLimit = Math.max(1, Math.min(requestedLimit, 200));
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONSTANTS.IATF_GAP_SHEET);
+    if (!sheet || sheet.getLastRow() <= 4) {
+      return {
+        sheetName: CONSTANTS.IATF_GAP_SHEET,
+        rowCount: 0,
+        severitySummary: {},
+        statusSummary: {},
+        rows: []
+      };
+    }
+
+    var rowCount = sheet.getLastRow() - 4;
+    var values = sheet.getRange(5, 1, rowCount, CONSTANTS.IATF_GAP_HEADERS.length).getDisplayValues();
+    var severitySummary = {};
+    var statusSummary = {};
+    var rows = values.map(function(row) {
+      var mapped = {
+        LINK_KEY: SyncUtils.asString(row[0]),
+        PROCESS_NO: SyncUtils.asString(row[1]),
+        STEP_TITLE: SyncUtils.asString(row[2]),
+        AREA: SyncUtils.asString(row[3]),
+        SEVERITY: SyncUtils.asString(row[4]),
+        STATUS: SyncUtils.asString(row[5]),
+        DETAIL: SyncUtils.asString(row[6])
+      };
+      var severity = mapped.SEVERITY || 'UNSPECIFIED';
+      var status = mapped.STATUS || 'UNSPECIFIED';
+      severitySummary[severity] = (severitySummary[severity] || 0) + 1;
+      statusSummary[status] = (statusSummary[status] || 0) + 1;
+      return mapped;
+    });
+
+    return {
+      sheetName: CONSTANTS.IATF_GAP_SHEET,
+      rowCount: rowCount,
+      severitySummary: severitySummary,
+      statusSummary: statusSummary,
+      rows: rows.slice(0, rowLimit)
+    };
+  }
+
+  function debugIatfLink(linkKey) {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var links = loadAllLinkRows_();
+    var link = null;
+    for (var index = 0; index < links.length; index += 1) {
+      if (SyncUtils.asString(links[index].LINK_KEY) === SyncUtils.asString(linkKey)) {
+        link = links[index];
+        break;
+      }
+    }
+    if (!link) {
+      throw new Error('Link not found: ' + linkKey);
+    }
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    var pfmeaRows = getPfmeaRowsForLink_(link, pfmeaSpreadsheet, {});
+    var payload = buildActualPayload_(pfmeaRows, link);
+    var cleanRecord = buildCleanRecord_(link, pfmeaRows, payload, SyncUtils.nowIso());
+    var kplnDetails = readKplnDetailRows_(getSheet_(config.KPLN_SHEET_NAME), link);
+    var iatfContext = buildIatfContext_(link, cleanRecord, kplnDetails, SyncUtils.nowIso());
+
+    return {
+      linkKey: link.LINK_KEY,
+      stepTitle: cleanRecord.stepTitle,
+      kplnDetails: kplnDetails,
+      reactionItems: iatfContext.reactionItems,
+      gapRows: iatfContext.gapRows,
+      openGapCount: iatfContext.openGapCount
     };
   }
 
@@ -3257,6 +3475,8 @@ var ActualSyncService = (function() {
     debugPfmeaSheet: debugPfmeaSheet,
     debugPfmeaWorkbookSummary: debugPfmeaWorkbookSummary,
     debugKplnBlock: debugKplnBlock,
+    debugIatfGaps: debugIatfGaps,
+    debugIatfLink: debugIatfLink,
     openConfig: openConfig,
     openLinks: openLinks,
     openTemplates: openTemplates

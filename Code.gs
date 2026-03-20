@@ -122,6 +122,18 @@ function remoteDebugKplnBlock() {
   });
 }
 
+function remoteDebugIatfGaps() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.debugIatfGaps(20);
+  });
+}
+
+function remoteDebugIatfLink() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.debugIatfLink('LINK-10.1');
+  });
+}
+
 function runFullSync() {
   return UIService.runFullSyncAction(false);
 }
@@ -190,6 +202,14 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.debugKplnBlock(request.linkKey || 'LINK-10.1');
     });
+  } else if (action === 'debugIatfGaps') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugIatfGaps(request.limit || 20);
+    });
+  } else if (action === 'debugIatfLink') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugIatfLink(request.linkKey || 'LINK-10.1');
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -217,7 +237,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, debugKpln, refreshTemplates, validate, preview, run, generateClean, or generateIatf.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, debugKpln, debugIatfGaps, debugIatfLink, refreshTemplates, validate, preview, run, generateClean, or generateIatf.'
     };
   }
 
