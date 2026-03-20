@@ -152,6 +152,10 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.debugLinkSelection(request.linkKey || 'LINK-10.1', request.limit || 10);
     });
+  } else if (action === 'debugSheet') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugPfmeaSheet(request.sheetName || '13', request.limit || 20);
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -167,7 +171,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, refreshTemplates, validate, or preview.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, refreshTemplates, validate, or preview.'
     };
   }
 
@@ -185,6 +189,7 @@ function parseRemoteWebRequest_(e) {
   if (e && e.parameter) {
     request.action = e.parameter.action || '';
     request.linkKey = e.parameter.linkKey || '';
+    request.sheetName = e.parameter.sheetName || '';
     request.limit = e.parameter.limit || '';
   }
   if (e && e.postData && e.postData.contents) {
@@ -195,6 +200,9 @@ function parseRemoteWebRequest_(e) {
       }
       if (body && body.linkKey) {
         request.linkKey = body.linkKey;
+      }
+      if (body && body.sheetName) {
+        request.sheetName = body.sheetName;
       }
       if (body && body.limit) {
         request.limit = body.limit;

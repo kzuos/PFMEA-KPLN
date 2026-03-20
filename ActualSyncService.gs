@@ -625,6 +625,41 @@ var ActualSyncService = (function() {
     };
   }
 
+  function debugPfmeaSheet(sheetName, sampleLimit) {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    var sheet = pfmeaSpreadsheet.getSheetByName(SyncUtils.asString(sheetName));
+    if (!sheet) {
+      throw new Error('PFMEA sheet not found: ' + sheetName);
+    }
+
+    var rows = parsePfmeaSheet_(sheet);
+    var limit = Math.max(1, Math.min(toNumber_(sampleLimit) || 20, 50));
+
+    return {
+      sheetName: sheet.getName(),
+      rowCount: rows.length,
+      distinctIssueNos: aggregateUniqueField_(rows, 'ISSUE_NO').length,
+      distinctProcessItems: aggregateUniqueField_(rows, 'PROCESS_ITEM').slice(0, 20),
+      distinctProcessSteps: aggregateUniqueField_(rows, 'PROCESS_STEP').slice(0, 20),
+      sampleRows: rows.slice(0, limit).map(function(row) {
+        return {
+          SOURCE_ROW: row.SOURCE_ROW,
+          ISSUE_NO: row.ISSUE_NO,
+          PROCESS_ITEM: row.PROCESS_ITEM,
+          PROCESS_STEP: row.PROCESS_STEP,
+          FAILURE_MODE: row.FAILURE_MODE,
+          FAILURE_CAUSE: row.FAILURE_CAUSE
+        };
+      })
+    };
+  }
+
   function parsePfmeaSheet_(sheet) {
     if (!sheet) {
       return [];
@@ -1823,6 +1858,7 @@ var ActualSyncService = (function() {
     previewSync: previewSync,
     runSync: runSync,
     debugLinkSelection: debugLinkSelection,
+    debugPfmeaSheet: debugPfmeaSheet,
     openConfig: openConfig,
     openLinks: openLinks,
     openTemplates: openTemplates
