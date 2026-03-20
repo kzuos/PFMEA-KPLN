@@ -638,11 +638,23 @@ var ActualSyncService = (function() {
       throw new Error('PFMEA sheet not found: ' + sheetName);
     }
 
+    var values = sheet.getDataRange().getDisplayValues();
+    var issueHeaderRow = -1;
+    for (var rowIndex = 0; rowIndex < Math.min(values.length, 12); rowIndex += 1) {
+      if (SyncUtils.asString(values[rowIndex][0]) === 'Issue #') {
+        issueHeaderRow = rowIndex;
+        break;
+      }
+    }
+    var detailHeaders = issueHeaderRow > -1 && issueHeaderRow + 1 < values.length ? values[issueHeaderRow + 1] : [];
+    var indexMap = buildPfmeaIndexMap_(detailHeaders);
     var rows = parsePfmeaSheet_(sheet);
     var limit = Math.max(1, Math.min(toNumber_(sampleLimit) || 20, 50));
 
     return {
       sheetName: sheet.getName(),
+      issueHeaderRow: issueHeaderRow + 1,
+      mappedHeaders: buildMappedHeaderDebug_(detailHeaders, indexMap),
       rowCount: rows.length,
       distinctIssueNos: aggregateUniqueField_(rows, 'ISSUE_NO').length,
       distinctProcessItems: aggregateUniqueField_(rows, 'PROCESS_ITEM').slice(0, 20),
@@ -658,6 +670,18 @@ var ActualSyncService = (function() {
         };
       })
     };
+  }
+
+  function buildMappedHeaderDebug_(headers, indexMap) {
+    var debug = {};
+    Object.keys(indexMap).forEach(function(key) {
+      var index = indexMap[key];
+      debug[key] = {
+        index: index,
+        header: index > -1 ? SyncUtils.asString(headers[index]) : ''
+      };
+    });
+    return debug;
   }
 
   function parsePfmeaSheet_(sheet) {
@@ -680,23 +704,7 @@ var ActualSyncService = (function() {
     }
 
     var detailHeaders = values[issueHeaderRow + 1];
-    var indexMap = {
-      ISSUE_NO: 0,
-      PROCESS_ITEM: findHeaderIndex_(detailHeaders, '1. PROCESS ITEM'),
-      PROCESS_STEP: findHeaderIndex_(detailHeaders, '2. PROCESS STEP'),
-      WORK_ELEMENT_4M: findHeaderIndex_(detailHeaders, '3. PROCESS WORK ELEMENT'),
-      FAILURE_EFFECT: findHeaderIndex_(detailHeaders, '1. FAILURE EFFECTS'),
-      FAILURE_MODE: findHeaderIndex_(detailHeaders, '2. FAILURE MODE'),
-      FAILURE_CAUSE: findHeaderIndex_(detailHeaders, '3. FAILURE CAUSE'),
-      PREVENTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT PREVENTION CONTROL'),
-      DETECTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT DETECTION CONTROL'),
-      SPECIAL_CHARACTERISTIC: findHeaderIndex_(detailHeaders, 'SPECIAL CHARACTERISTIC'),
-      PRODUCT_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PRODUCT CHARACTERISTIC', 'PRODUCT CHAR']),
-      PROCESS_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PROCESS CHARACTERISTIC', 'PROCESS CHAR']),
-      SPECIFICATION_TOLERANCE: findFirstHeaderIndex_(detailHeaders, ['SPECIFICATION / TOLERANCE', 'SPECIFICATION', 'TOLERANCE']),
-      REACTION_PLAN: findFirstHeaderIndex_(detailHeaders, ['REACTION PLAN', 'ACTION PLAN', 'CONTINGENCY ACTION']),
-      PFMEA_AP: findHeaderIndex_(detailHeaders, 'PFMEA AP')
-    };
+    var indexMap = buildPfmeaIndexMap_(detailHeaders);
 
     var records = [];
     var carried = {
@@ -779,6 +787,26 @@ var ActualSyncService = (function() {
 
   function getCellByIndex_(row, index) {
     return index > -1 ? SyncUtils.asString(row[index]) : '';
+  }
+
+  function buildPfmeaIndexMap_(detailHeaders) {
+    return {
+      ISSUE_NO: 0,
+      PROCESS_ITEM: findHeaderIndex_(detailHeaders, '1. PROCESS ITEM'),
+      PROCESS_STEP: findHeaderIndex_(detailHeaders, '2. PROCESS STEP'),
+      WORK_ELEMENT_4M: findHeaderIndex_(detailHeaders, '3. PROCESS WORK ELEMENT'),
+      FAILURE_EFFECT: findHeaderIndex_(detailHeaders, '1. FAILURE EFFECTS'),
+      FAILURE_MODE: findHeaderIndex_(detailHeaders, '2. FAILURE MODE'),
+      FAILURE_CAUSE: findHeaderIndex_(detailHeaders, '3. FAILURE CAUSE'),
+      PREVENTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT PREVENTION CONTROL'),
+      DETECTION_CONTROLS: findHeaderIndex_(detailHeaders, 'CURRENT DETECTION CONTROL'),
+      SPECIAL_CHARACTERISTIC: findHeaderIndex_(detailHeaders, 'SPECIAL CHARACTERISTIC'),
+      PRODUCT_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PRODUCT CHARACTERISTIC', 'PRODUCT CHAR']),
+      PROCESS_CHARACTERISTIC: findFirstHeaderIndex_(detailHeaders, ['PROCESS CHARACTERISTIC', 'PROCESS CHAR']),
+      SPECIFICATION_TOLERANCE: findFirstHeaderIndex_(detailHeaders, ['SPECIFICATION / TOLERANCE', 'SPECIFICATION', 'TOLERANCE']),
+      REACTION_PLAN: findFirstHeaderIndex_(detailHeaders, ['REACTION PLAN', 'ACTION PLAN', 'CONTINGENCY ACTION']),
+      PFMEA_AP: findHeaderIndex_(detailHeaders, 'PFMEA AP')
+    };
   }
 
   function fillDownValue_(value, carried, key) {
