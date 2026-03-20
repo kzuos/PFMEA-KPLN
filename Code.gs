@@ -90,6 +90,12 @@ function remoteRunActualSync() {
   });
 }
 
+function remoteDebugActualSelection() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.debugLinkSelection('LINK-10.1', 10);
+  });
+}
+
 function runFullSync() {
   return UIService.runFullSyncAction(false);
 }
@@ -142,6 +148,10 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return inspectActualLink_(request.linkKey || 'LINK-10.1');
     });
+  } else if (action === 'debugSelection') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugLinkSelection(request.linkKey || 'LINK-10.1', request.limit || 10);
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -157,7 +167,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, refreshTemplates, validate, or preview.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, refreshTemplates, validate, or preview.'
     };
   }
 
@@ -175,6 +185,7 @@ function parseRemoteWebRequest_(e) {
   if (e && e.parameter) {
     request.action = e.parameter.action || '';
     request.linkKey = e.parameter.linkKey || '';
+    request.limit = e.parameter.limit || '';
   }
   if (e && e.postData && e.postData.contents) {
     try {
@@ -184,6 +195,9 @@ function parseRemoteWebRequest_(e) {
       }
       if (body && body.linkKey) {
         request.linkKey = body.linkKey;
+      }
+      if (body && body.limit) {
+        request.limit = body.limit;
       }
     } catch (ignored) {
       // Fall back to query parameters.

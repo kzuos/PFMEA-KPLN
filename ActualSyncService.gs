@@ -578,6 +578,53 @@ var ActualSyncService = (function() {
     });
   }
 
+  function debugLinkSelection(linkKey, sampleLimit) {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var links = loadAllLinkRows_();
+    var link = null;
+    for (var index = 0; index < links.length; index += 1) {
+      if (SyncUtils.asString(links[index].LINK_KEY) === SyncUtils.asString(linkKey)) {
+        link = links[index];
+        break;
+      }
+    }
+    if (!link) {
+      throw new Error('Link not found: ' + linkKey);
+    }
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    var pfmeaRows = getPfmeaRowsForLink_(link, pfmeaSpreadsheet, {});
+    var selectionInspection = inspectPfmeaSelection_(link, pfmeaRows);
+    var limit = Math.max(1, Math.min(toNumber_(sampleLimit) || 10, 25));
+
+    return {
+      linkKey: link.LINK_KEY,
+      pfmeaSheetName: link.PFMEA_SHEET_NAME,
+      pfmeaStepFilter: link.PFMEA_STEP_FILTER,
+      filterTerms: splitFilterTerms_(link.PFMEA_STEP_FILTER),
+      rowCount: pfmeaRows.length,
+      selectionInspection: selectionInspection,
+      distinctIssueNos: aggregateUniqueField_(pfmeaRows, 'ISSUE_NO').length,
+      distinctProcessItems: aggregateUniqueField_(pfmeaRows, 'PROCESS_ITEM'),
+      distinctProcessSteps: aggregateUniqueField_(pfmeaRows, 'PROCESS_STEP'),
+      sampleRows: pfmeaRows.slice(0, limit).map(function(row) {
+        return {
+          SOURCE_ROW: row.SOURCE_ROW,
+          ISSUE_NO: row.ISSUE_NO,
+          PROCESS_ITEM: row.PROCESS_ITEM,
+          PROCESS_STEP: row.PROCESS_STEP,
+          FAILURE_MODE: row.FAILURE_MODE,
+          FAILURE_CAUSE: row.FAILURE_CAUSE
+        };
+      })
+    };
+  }
+
   function parsePfmeaSheet_(sheet) {
     if (!sheet) {
       return [];
@@ -1775,6 +1822,7 @@ var ActualSyncService = (function() {
     validateSetup: validateSetup,
     previewSync: previewSync,
     runSync: runSync,
+    debugLinkSelection: debugLinkSelection,
     openConfig: openConfig,
     openLinks: openLinks,
     openTemplates: openTemplates
