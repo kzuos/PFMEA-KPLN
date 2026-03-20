@@ -22,9 +22,16 @@ var DocsService = (function() {
     }
     var body = document.getBody();
     var section = findSection_(body, startMarker, endMarker, stepId);
+    var duplicateSections = section.found ? findDuplicateSections_(body, startMarker, endMarker, stepId) : [];
     var sectionModel = buildSectionModel_(payload, stepId);
     var newPlainText = buildPlainText_(sectionModel);
     var placement = resolvePlacement_(body, options);
+
+    if (section.found && duplicateSections.length && !options.dryRun) {
+      backupDocumentIfNeeded_(docId, options);
+      removeManagedSections_(body, duplicateSections);
+      section = findSection_(body, startMarker, endMarker, stepId);
+    }
 
     if (!section.found) {
       if (!options.createMissingSection) {
@@ -211,7 +218,11 @@ var DocsService = (function() {
   }
 
   function findSection_(body, startMarker, endMarker, stepId) {
-    var result = {
+    var sections = findAllSections_(body, startMarker, endMarker, stepId);
+    if (sections.length) {
+      return sections[0];
+    }
+    return {
       found: false,
       startIndex: -1,
       endIndex: -1,
@@ -219,25 +230,40 @@ var DocsService = (function() {
       locked: false,
       inclusiveEndIndex: -1
     };
+  }
+
+  function findDuplicateSections_(body, startMarker, endMarker, stepId) {
+    return findAllSections_(body, startMarker, endMarker, stepId).slice(1);
+  }
+
+  function findAllSections_(body, startMarker, endMarker, stepId) {
+    var sections = [];
+    var openStartIndex = -1;
     var lockMarker = APP_CONSTANTS.DOC_MARKERS.LOCK_PREFIX + stepId + ']]';
 
     for (var index = 0; index < body.getNumChildren(); index += 1) {
       var child = body.getChild(index);
       var text = getElementText_(child);
       if (text === startMarker) {
-        result.found = true;
-        result.startIndex = index;
-      } else if (text === endMarker && result.startIndex > -1) {
-        result.endIndex = index;
-        result.inclusiveEndIndex = index;
-        break;
+        openStartIndex = index;
+      } else if (text === endMarker && openStartIndex > -1) {
+        sections.push(buildSectionResult_(body, openStartIndex, index, lockMarker));
+        openStartIndex = -1;
       }
     }
 
-    if (!result.found || result.endIndex === -1) {
-      result.found = false;
-      return result;
-    }
+    return sections;
+  }
+
+  function buildSectionResult_(body, startIndex, endIndex, lockMarker) {
+    var result = {
+      found: true,
+      startIndex: startIndex,
+      endIndex: endIndex,
+      currentText: '',
+      locked: false,
+      inclusiveEndIndex: endIndex
+    };
 
     var lines = [];
     for (var contentIndex = result.startIndex + 1; contentIndex < result.endIndex; contentIndex += 1) {
@@ -400,6 +426,14 @@ var DocsService = (function() {
     for (var removeIndex = removeEnd; removeIndex >= removeStart; removeIndex -= 1) {
       body.removeChild(body.getChild(removeIndex));
     }
+  }
+
+  function removeManagedSections_(body, sections) {
+    sections.slice().sort(function(left, right) {
+      return right.startIndex - left.startIndex;
+    }).forEach(function(section) {
+      removeBodyRange_(body, section.startIndex, section.inclusiveEndIndex);
+    });
   }
 
   function shouldRelocateSection_(section, placement) {

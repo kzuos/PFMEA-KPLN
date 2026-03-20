@@ -673,6 +673,40 @@ var ActualSyncService = (function() {
     };
   }
 
+  function debugPfmeaWorkbookSummary() {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    return getPfmeaProcessSheets_(pfmeaSpreadsheet).map(function(sheet) {
+      var rows = parsePfmeaSheet_(sheet);
+      return {
+        sheetName: sheet.getName(),
+        rowCount: rows.length,
+        processName: chooseDominantValue_(rows, 'PROCESS_ITEM') || '',
+        stepName: chooseDominantValue_(rows, 'PROCESS_STEP') || '',
+        distinctProcessItems: aggregateUniqueField_(rows, 'PROCESS_ITEM').slice(0, 10),
+        distinctProcessSteps: aggregateUniqueField_(rows, 'PROCESS_STEP').slice(0, 10),
+        nonEmptyCounts: {
+          processItem: countNonEmptyField_(rows, 'PROCESS_ITEM'),
+          processStep: countNonEmptyField_(rows, 'PROCESS_STEP'),
+          workElement: countNonEmptyField_(rows, 'WORK_ELEMENT_4M'),
+          failureMode: countNonEmptyField_(rows, 'FAILURE_MODE'),
+          failureEffect: countNonEmptyField_(rows, 'FAILURE_EFFECT'),
+          failureCause: countNonEmptyField_(rows, 'FAILURE_CAUSE'),
+          preventionControls: countNonEmptyField_(rows, 'PREVENTION_CONTROLS'),
+          detectionControls: countNonEmptyField_(rows, 'DETECTION_CONTROLS'),
+          productCharacteristic: countNonEmptyField_(rows, 'PRODUCT_CHARACTERISTIC'),
+          processCharacteristic: countNonEmptyField_(rows, 'PROCESS_CHARACTERISTIC'),
+          reactionPlan: countNonEmptyField_(rows, 'REACTION_PLAN')
+        }
+      };
+    });
+  }
+
   function buildMappedHeaderDebug_(headers, indexMap) {
     var debug = {};
     Object.keys(indexMap).forEach(function(key) {
@@ -1110,6 +1144,16 @@ var ActualSyncService = (function() {
       }
     });
     return Object.keys(values).length;
+  }
+
+  function countNonEmptyField_(rows, fieldName) {
+    var count = 0;
+    rows.forEach(function(row) {
+      if (!SyncUtils.isBlank(row[fieldName])) {
+        count += 1;
+      }
+    });
+    return count;
   }
 
   function ensureHelperSheets_() {
@@ -1910,6 +1954,7 @@ var ActualSyncService = (function() {
     runSync: runSync,
     debugLinkSelection: debugLinkSelection,
     debugPfmeaSheet: debugPfmeaSheet,
+    debugPfmeaWorkbookSummary: debugPfmeaWorkbookSummary,
     openConfig: openConfig,
     openLinks: openLinks,
     openTemplates: openTemplates

@@ -156,6 +156,10 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.debugPfmeaSheet(request.sheetName || '13', request.limit || 20);
     });
+  } else if (action === 'debugWorkbook') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.debugPfmeaWorkbookSummary();
+    });
   } else if (action === 'refreshTemplates') {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.refreshTemplates();
@@ -175,7 +179,7 @@ function handleRemoteWebRequest_(e) {
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, refreshTemplates, validate, preview, or run.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, refreshTemplates, validate, preview, or run.'
     };
   }
 
