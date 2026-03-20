@@ -42,6 +42,10 @@ function runActualSync() {
   return UIService.runActualSyncAction();
 }
 
+function generateCleanDeliverables() {
+  return UIService.generateCleanDeliverablesAction();
+}
+
 function openActualConfig() {
   return UIService.openActualConfigAction();
 }
@@ -87,6 +91,12 @@ function remotePreviewActualSync() {
 function remoteRunActualSync() {
   return runRemoteActualAction_(function() {
     return ActualSyncService.runSync();
+  });
+}
+
+function remoteGenerateCleanDeliverables() {
+  return runRemoteActualAction_(function() {
+    return ActualSyncService.generateCleanDeliverables();
   });
 }
 
@@ -176,10 +186,14 @@ function handleRemoteWebRequest_(e) {
     result = runRemoteActualAction_(function() {
       return ActualSyncService.runSync();
     });
+  } else if (action === 'generateClean') {
+    result = runRemoteActualAction_(function() {
+      return ActualSyncService.generateCleanDeliverables();
+    });
   } else {
     result = {
       ok: false,
-      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, refreshTemplates, validate, preview, or run.'
+      error: 'Unsupported action. Use refresh, inspectLink, debugSelection, debugSheet, debugWorkbook, refreshTemplates, validate, preview, run, or generateClean.'
     };
   }
 

@@ -8,6 +8,7 @@ var UIService = (function() {
       .addItem('Validate Actual Sync', 'validateActualSync')
       .addItem('Preview Actual Sync', 'previewActualSync')
       .addItem('Run Actual Sync', 'runActualSync')
+      .addItem('Generate Clean KPLN + WI', 'generateCleanDeliverables')
       .addSeparator()
       .addItem('Open Actual Config', 'openActualConfig')
       .addItem('Open Actual Links', 'openActualLinks')
@@ -227,6 +228,19 @@ var UIService = (function() {
     });
   }
 
+  function generateCleanDeliverablesAction() {
+    return runActualAction_(function() {
+      var result = ActualSyncService.generateCleanDeliverables();
+      var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+      var cleanSheet = spreadsheet.getSheetByName(result.cleanKplnSheet);
+      if (cleanSheet) {
+        spreadsheet.setActiveSheet(cleanSheet);
+      }
+      showCleanDeliverableSummary_(result);
+      return result;
+    });
+  }
+
   function openActualConfigAction() {
     ActualSyncService.openConfig();
   }
@@ -272,6 +286,22 @@ var UIService = (function() {
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
   }
 
+  function showCleanDeliverableSummary_(result) {
+    var ui = SpreadsheetApp.getUi();
+    var message = [
+      result.ok ? 'Clean KPLN and WI drafts generated.' : 'Clean output generation finished with issues.',
+      'Links processed: ' + result.processed,
+      'KPLN rows generated: ' + result.generatedKplnRows,
+      'WI docs generated: ' + result.generatedWiDocs,
+      'Skipped: ' + result.skipped,
+      'Errors: ' + result.errors,
+      'KPLN sheet: ' + result.cleanKplnSheet,
+      'WI index sheet: ' + result.cleanWiIndexSheet,
+      'Output folder: ' + result.cleanFolderUrl
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+  }
+
   function runActualAction_(action) {
     try {
       return action();
@@ -296,6 +326,7 @@ var UIService = (function() {
     validateActualSyncAction: validateActualSyncAction,
     previewActualSyncAction: previewActualSyncAction,
     runActualSyncAction: runActualSyncAction,
+    generateCleanDeliverablesAction: generateCleanDeliverablesAction,
     openActualConfigAction: openActualConfigAction,
     openActualLinksAction: openActualLinksAction,
     openActualTemplatesAction: openActualTemplatesAction

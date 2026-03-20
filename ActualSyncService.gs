@@ -6,6 +6,8 @@ var ActualSyncService = (function() {
     WI_TEMPLATES_SHEET: 'WI_TEMPLATES',
     PFMEA_VIEW_SHEET: 'PFMEA_SYNC_VIEW',
     LOG_SHEET: 'CHANGE_LOG',
+    CLEAN_KPLN_SHEET: 'CLEAN_KPLN',
+    CLEAN_WI_INDEX_SHEET: 'CLEAN_WI_INDEX',
     DEFAULT_PFMEA_SPREADSHEET_ID: '',
     DEFAULT_KPLN_SHEET_NAME: '',
     DEFAULT_WI_TEMPLATE_FOLDER_ID: '',
@@ -71,6 +73,38 @@ var ActualSyncService = (function() {
       'SPECIFICATION_TOLERANCE',
       'REACTION_PLAN',
       'PFMEA_AP'
+    ],
+    CLEAN_KPLN_HEADERS: [
+      'PROCESS_NO',
+      'STEP_TITLE',
+      'PROCESS_REQUIREMENT',
+      'PRODUCT_CHARACTERISTICS',
+      'PROCESS_CHARACTERISTICS',
+      'SPECIAL_CHARACTERISTICS',
+      'SPECIFICATION_TOLERANCE',
+      'FAILURE_RISKS',
+      'PREVENTION_CONTROLS',
+      'DETECTION_CONTROLS',
+      'CONTROL_METHOD',
+      'REACTION_PLAN',
+      'PFMEA_SHEET',
+      'PFMEA_STEP_FILTER',
+      'PFMEA_ISSUE_NOS',
+      'SOURCE_ROW_COUNT',
+      'WI_LINK'
+    ],
+    CLEAN_WI_INDEX_HEADERS: [
+      'LINK_KEY',
+      'PROCESS_NO',
+      'STEP_TITLE',
+      'DOC_NAME',
+      'DOC_ID',
+      'DOC_URL',
+      'PFMEA_SHEET_NAME',
+      'PFMEA_STEP_FILTER',
+      'PFMEA_ISSUE_NOS',
+      'SOURCE_ROW_COUNT',
+      'LAST_GENERATED_AT'
     ],
     LINK_STATUS: {
       APPROVED: 'APPROVED',
@@ -177,6 +211,128 @@ var ActualSyncService = (function() {
 
   function runSync() {
     return runSync_(false, 'ACTUAL_SYNC');
+  }
+
+  function generateCleanDeliverables() {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    assertActualConfigurationReady_(config);
+
+    var pfmeaSpreadsheet = openPfmeaSpreadsheet_(config);
+    var links = loadSyncLinks_(config);
+    if (!links.length) {
+      throw new Error('No active PFMEA links are available. Approve at least one row in SYNC_LINKS first.');
+    }
+
+    var generatedAt = SyncUtils.nowIso();
+    var cleanFolder = ensureCleanOutputFolder_(config);
+    var cleanIndex = loadCleanWiIndexRows_();
+    var pfmeaCache = {};
+    var cleanKplnRows = [];
+    var cleanWiRows = [];
+    var logEntries = [];
+    var summary = {
+      ok: true,
+      processed: 0,
+      generatedKplnRows: 0,
+      generatedWiDocs: 0,
+      skipped: 0,
+      errors: 0,
+      cleanKplnSheet: CONSTANTS.CLEAN_KPLN_SHEET,
+      cleanWiIndexSheet: CONSTANTS.CLEAN_WI_INDEX_SHEET,
+      cleanFolderId: cleanFolder.getId(),
+      cleanFolderUrl: cleanFolder.getUrl()
+    };
+
+    links.forEach(function(link) {
+      summary.processed += 1;
+      try {
+        var pfmeaRows = getPfmeaRowsForLink_(link, pfmeaSpreadsheet, pfmeaCache);
+        if (!pfmeaRows.length) {
+          summary.skipped += 1;
+          logEntries.push(createActualLogEntry_('CLEAN_GENERATION', link, 'NO_PFMEA_MATCH', APP_CONSTANTS.STATUS.SKIPPED, '', '', 'Skipped clean output because no PFMEA rows matched this link.'));
+          return;
+        }
+
+        var selectionInspection = inspectPfmeaSelection_(link, pfmeaRows);
+        if (selectionInspection.error) {
+          summary.errors += 1;
+          summary.ok = false;
+          logEntries.push(createActualLogEntry_('CLEAN_GENERATION', link, 'PFMEA_SELECTION_TOO_BROAD', APP_CONSTANTS.STATUS.ERROR, '', {
+            rowCount: selectionInspection.rowCount,
+            distinctSteps: selectionInspection.distinctSteps,
+            distinctProcesses: selectionInspection.distinctProcesses
+          }, selectionInspection.error));
+          return;
+        }
+
+        var payload = buildActualPayload_(pfmeaRows, link);
+        var cleanRecord = buildCleanRecord_(link, pfmeaRows, payload, generatedAt);
+        var existingCleanDoc = cleanIndex[link.LINK_KEY] || {};
+        var cleanDoc = DocsService.createCleanWorkInstructionDocument({
+          DOC_ID: existingCleanDoc.DOC_ID,
+          TITLE: buildCleanWiTitle_(link, payload),
+          LINK_KEY: link.LINK_KEY,
+          PROCESS_NO: link.KPLN_PROCESS_NO,
+          STEP_TITLE: cleanRecord.stepTitle,
+          PROCESS_REQUIREMENT: cleanRecord.processRequirement,
+          PRODUCT_CHARACTERISTICS: cleanRecord.productCharacteristicsText,
+          PROCESS_CHARACTERISTICS: cleanRecord.processCharacteristicsText,
+          SPECIAL_CHARACTERISTICS: cleanRecord.specialCharacteristicsText,
+          SPECIFICATION_TOLERANCE: cleanRecord.specificationToleranceText,
+          FAILURE_ITEMS: cleanRecord.failureItems,
+          PREVENTION_ITEMS: cleanRecord.preventionItems,
+          DETECTION_ITEMS: cleanRecord.detectionItems,
+          CONTROL_METHOD: cleanRecord.controlMethod,
+          REACTION_PLAN_ITEMS: cleanRecord.reactionItems,
+          PFMEA_SHEET_NAME: link.PFMEA_SHEET_NAME,
+          PFMEA_PROCESS_NAME: link.PFMEA_PROCESS_NAME,
+          PFMEA_STEP_FILTER: link.PFMEA_STEP_FILTER,
+          PFMEA_ISSUE_NOS: cleanRecord.issueNoText,
+          SOURCE_ROW_COUNT: cleanRecord.sourceRowCount,
+          LAST_GENERATED_AT: generatedAt
+        }, {
+          docId: existingCleanDoc.DOC_ID,
+          folderId: cleanFolder.getId()
+        });
+
+        cleanKplnRows.push(buildCleanKplnRow_(link, cleanRecord, cleanDoc.documentUrl));
+        cleanWiRows.push(buildCleanWiIndexRow_(link, cleanRecord, cleanDoc, generatedAt));
+        summary.generatedKplnRows += 1;
+        summary.generatedWiDocs += 1;
+        logEntries.push(createActualLogEntry_(
+          'CLEAN_GENERATION',
+          link,
+          cleanDoc.created ? 'GENERATE_CLEAN_WI' : 'UPDATE_CLEAN_WI',
+          APP_CONSTANTS.STATUS.SUCCESS,
+          '',
+          {
+            docId: cleanDoc.docId,
+            docName: cleanDoc.documentName,
+            issueNos: cleanRecord.issueNoText
+          },
+          cleanDoc.created ? 'Created clean Work Instruction draft.' : 'Updated clean Work Instruction draft.'
+        ));
+      } catch (error) {
+        summary.errors += 1;
+        summary.ok = false;
+        logEntries.push(createActualLogEntry_('CLEAN_GENERATION', link, 'GENERATE_CLEAN_OUTPUT', APP_CONSTANTS.STATUS.ERROR, '', '', error.message || String(error)));
+      }
+    });
+
+    writeCleanKplnSheet_(pfmeaSpreadsheet, cleanKplnRows, generatedAt);
+    writeCleanWiIndexSheet_(cleanWiRows, generatedAt, cleanFolder);
+
+    if (logEntries.length) {
+      LogService.logEntries(logEntries, {
+        CHANGE_LOG_SHEET: CONSTANTS.LOG_SHEET,
+        CHANGE_LOG_HEADER_ROW: 1
+      });
+    }
+
+    return summary;
   }
 
   function openConfig() {
@@ -441,6 +597,116 @@ var ActualSyncService = (function() {
       detectionControls: aggregateUniqueField_(pfmeaRows, 'DETECTION_CONTROLS').join('; '),
       issueNos: aggregateUniqueField_(pfmeaRows, 'ISSUE_NO').join(', ')
     };
+  }
+
+  function buildCleanRecord_(link, pfmeaRows, payload, generatedAt) {
+    var failureItems = buildFailureItems_(pfmeaRows);
+    var preventionItems = aggregateUniqueField_(pfmeaRows, 'PREVENTION_CONTROLS');
+    var detectionItems = aggregateUniqueField_(pfmeaRows, 'DETECTION_CONTROLS');
+    var reactionItems = aggregateUniqueField_(pfmeaRows, 'REACTION_PLAN');
+    var productCharacteristics = aggregateUniqueField_(pfmeaRows, 'PRODUCT_CHARACTERISTIC');
+    var processCharacteristics = aggregateUniqueField_(pfmeaRows, 'PROCESS_CHARACTERISTIC');
+    var workElements = aggregateUniqueField_(pfmeaRows, 'WORK_ELEMENT_4M');
+    var specialCharacteristics = aggregateUniqueField_(pfmeaRows, 'SPECIAL_CHARACTERISTIC');
+    var specificationTolerance = aggregateUniqueField_(pfmeaRows, 'SPECIFICATION_TOLERANCE');
+    var issueNos = aggregateUniqueField_(pfmeaRows, 'ISSUE_NO');
+    var effectiveProcessCharacteristics = processCharacteristics.length ? processCharacteristics : workElements;
+
+    return {
+      stepTitle: payload.stepTitle || link.KPLN_STEP_TITLE || link.LINK_KEY,
+      processRequirement: payload.processDescription || 'Not provided in PFMEA.',
+      productCharacteristics: productCharacteristics,
+      processCharacteristics: effectiveProcessCharacteristics,
+      specialCharacteristics: specialCharacteristics,
+      specificationTolerance: specificationTolerance,
+      failureItems: failureItems,
+      preventionItems: preventionItems,
+      detectionItems: detectionItems,
+      reactionItems: reactionItems,
+      controlMethod: payload.controlMethod || 'No combined control method summary was generated from the selected PFMEA rows.',
+      issueNos: issueNos,
+      issueNoText: issueNos.join(', '),
+      sourceRowCount: pfmeaRows.length,
+      productCharacteristicsText: formatListForCell_(productCharacteristics, 'Not provided in PFMEA.'),
+      processCharacteristicsText: formatListForCell_(effectiveProcessCharacteristics, 'Not provided in PFMEA.'),
+      specialCharacteristicsText: formatListForCell_(specialCharacteristics, 'Not provided in PFMEA.'),
+      specificationToleranceText: formatListForCell_(specificationTolerance, 'Not provided in PFMEA.'),
+      failureItemsText: formatListForCell_(failureItems, 'No failure risks were parsed from the selected PFMEA rows.'),
+      preventionItemsText: formatListForCell_(preventionItems, 'No prevention controls were provided in PFMEA.'),
+      detectionItemsText: formatListForCell_(detectionItems, 'No detection controls were provided in PFMEA.'),
+      reactionItemsText: formatListForCell_(reactionItems, 'No reaction plan was provided in PFMEA.'),
+      generatedAt: generatedAt
+    };
+  }
+
+  function buildFailureItems_(pfmeaRows) {
+    return SyncUtils.unique(pfmeaRows.map(function(row) {
+      var parts = [];
+      if (!SyncUtils.isBlank(row.FAILURE_MODE)) {
+        parts.push('Mode: ' + row.FAILURE_MODE);
+      }
+      if (!SyncUtils.isBlank(row.FAILURE_EFFECT)) {
+        parts.push('Effect: ' + row.FAILURE_EFFECT);
+      }
+      if (!SyncUtils.isBlank(row.FAILURE_CAUSE)) {
+        parts.push('Cause: ' + row.FAILURE_CAUSE);
+      }
+      return parts.join(' | ');
+    }).filter(function(line) {
+      return !!line;
+    }));
+  }
+
+  function formatListForCell_(items, emptyText) {
+    if (!items || !items.length) {
+      return emptyText || '';
+    }
+    return items.map(function(item) {
+      return '- ' + item;
+    }).join('\n');
+  }
+
+  function buildCleanWiTitle_(link, payload) {
+    var baseName = 'Clean WI - ' + link.KPLN_PROCESS_NO + ' - ' + (payload.stepTitle || link.KPLN_STEP_TITLE || link.LINK_KEY);
+    return SyncUtils.truncate(SyncUtils.sanitizeDriveName(baseName, 'Clean WI - ' + link.LINK_KEY), 180);
+  }
+
+  function buildCleanKplnRow_(link, cleanRecord, documentUrl) {
+    return [
+      link.KPLN_PROCESS_NO,
+      cleanRecord.stepTitle,
+      cleanRecord.processRequirement,
+      cleanRecord.productCharacteristicsText,
+      cleanRecord.processCharacteristicsText,
+      cleanRecord.specialCharacteristicsText,
+      cleanRecord.specificationToleranceText,
+      cleanRecord.failureItemsText,
+      cleanRecord.preventionItemsText,
+      cleanRecord.detectionItemsText,
+      cleanRecord.controlMethod,
+      cleanRecord.reactionItemsText,
+      link.PFMEA_SHEET_NAME,
+      link.PFMEA_STEP_FILTER,
+      cleanRecord.issueNoText,
+      String(cleanRecord.sourceRowCount),
+      buildHyperlinkFormula_(documentUrl, 'Open WI')
+    ];
+  }
+
+  function buildCleanWiIndexRow_(link, cleanRecord, cleanDoc, generatedAt) {
+    return [
+      link.LINK_KEY,
+      link.KPLN_PROCESS_NO,
+      cleanRecord.stepTitle,
+      cleanDoc.documentName,
+      cleanDoc.docId,
+      cleanDoc.documentUrl,
+      link.PFMEA_SHEET_NAME,
+      link.PFMEA_STEP_FILTER,
+      cleanRecord.issueNoText,
+      String(cleanRecord.sourceRowCount),
+      generatedAt
+    ];
   }
 
   function buildFailureSummary_(pfmeaRows) {
@@ -2148,6 +2414,170 @@ var ActualSyncService = (function() {
     }
   }
 
+  function writeCleanKplnSheet_(pfmeaSpreadsheet, rows, generatedAt) {
+    var headers = CONSTANTS.CLEAN_KPLN_HEADERS;
+    var sheet = getOrCreateSheet_(CONSTANTS.CLEAN_KPLN_SHEET);
+    resetSheet_(sheet);
+    sheet.getRange(1, 1, 1, headers.length).merge();
+    sheet.getRange(1, 1).setValue('Clean Control Plan from PFMEA');
+    sheet.getRange(2, 1, 1, headers.length).merge();
+    sheet.getRange(2, 1).setValue('Generated from approved PFMEA links on ' + generatedAt + ' | Source workbook: ' + pfmeaSpreadsheet.getName());
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setValues(rows);
+    }
+
+    sheet.setFrozenRows(4);
+    sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold').setHorizontalAlignment('left');
+    sheet.getRange(2, 1).setFontColor('#5f6368');
+    sheet.getRange(4, 1, 1, headers.length).setBackground('#16324f').setFontColor('#ffffff').setFontWeight('bold').setVerticalAlignment('middle');
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setWrap(true).setVerticalAlignment('top');
+      sheet.getRange(5, 1, rows.length, headers.length).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
+      sheet.getRange(4, 1, rows.length + 1, headers.length).createFilter();
+    }
+
+    setColumnWidths_(sheet, {
+      1: 90,
+      2: 240,
+      3: 220,
+      4: 200,
+      5: 200,
+      6: 180,
+      7: 180,
+      8: 320,
+      9: 220,
+      10: 220,
+      11: 260,
+      12: 220,
+      13: 90,
+      14: 160,
+      15: 120,
+      16: 120,
+      17: 90
+    });
+  }
+
+  function writeCleanWiIndexSheet_(rows, generatedAt, cleanFolder) {
+    var headers = CONSTANTS.CLEAN_WI_INDEX_HEADERS;
+    var sheet = getOrCreateSheet_(CONSTANTS.CLEAN_WI_INDEX_SHEET);
+    resetSheet_(sheet);
+    sheet.getRange(1, 1, 1, headers.length).merge();
+    sheet.getRange(1, 1).setValue('Clean WI Registry');
+    sheet.getRange(2, 1, 1, headers.length).merge();
+    sheet.getRange(2, 1).setValue('Generated on ' + generatedAt + ' | Folder: ' + cleanFolder.getName() + ' | ' + cleanFolder.getUrl());
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setValues(rows);
+    }
+
+    sheet.setFrozenRows(4);
+    sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold').setHorizontalAlignment('left');
+    sheet.getRange(2, 1).setFontColor('#5f6368');
+    sheet.getRange(4, 1, 1, headers.length).setBackground('#1f6f5f').setFontColor('#ffffff').setFontWeight('bold');
+    if (rows.length) {
+      sheet.getRange(5, 1, rows.length, headers.length).setWrap(true).setVerticalAlignment('top');
+      sheet.getRange(5, 1, rows.length, headers.length).applyRowBanding(SpreadsheetApp.BandingTheme.TEAL);
+      sheet.getRange(4, 1, rows.length + 1, headers.length).createFilter();
+    }
+
+    setColumnWidths_(sheet, {
+      1: 110,
+      2: 90,
+      3: 240,
+      4: 260,
+      5: 240,
+      6: 260,
+      7: 110,
+      8: 180,
+      9: 120,
+      10: 110,
+      11: 180
+    });
+  }
+
+  function ensureCleanOutputFolder_(config) {
+    var folderName = SyncUtils.sanitizeDriveName(SpreadsheetApp.getActiveSpreadsheet().getName() + ' - PFMEA Clean Outputs', 'PFMEA Clean Outputs');
+    var parentFolder = null;
+
+    if (SyncUtils.asString(config.WI_FOLDER_ID)) {
+      try {
+        parentFolder = DriveApp.getFolderById(config.WI_FOLDER_ID);
+      } catch (ignored) {
+        parentFolder = null;
+      }
+    }
+
+    if (!parentFolder) {
+      var spreadsheetFile = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId());
+      var parents = spreadsheetFile.getParents();
+      if (parents.hasNext()) {
+        parentFolder = parents.next();
+      }
+    }
+
+    if (!parentFolder) {
+      parentFolder = DriveApp.getRootFolder();
+    }
+
+    var folders = parentFolder.getFoldersByName(folderName);
+    return folders.hasNext() ? folders.next() : parentFolder.createFolder(folderName);
+  }
+
+  function loadCleanWiIndexRows_() {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONSTANTS.CLEAN_WI_INDEX_SHEET);
+    var map = {};
+    if (!sheet || sheet.getLastRow() <= 4) {
+      return map;
+    }
+    var rows = sheet.getRange(5, 1, sheet.getLastRow() - 4, CONSTANTS.CLEAN_WI_INDEX_HEADERS.length).getDisplayValues();
+    rows.forEach(function(row) {
+      var linkKey = SyncUtils.asString(row[0]);
+      if (linkKey) {
+        map[linkKey] = {
+          LINK_KEY: linkKey,
+          DOC_NAME: SyncUtils.asString(row[3]),
+          DOC_ID: SyncUtils.asString(row[4]),
+          DOC_URL: SyncUtils.asString(row[5])
+        };
+      }
+    });
+    return map;
+  }
+
+  function buildHyperlinkFormula_(url, label) {
+    if (!SyncUtils.asString(url)) {
+      return '';
+    }
+    return '=HYPERLINK("' + SyncUtils.asString(url).replace(/"/g, '""') + '","' + SyncUtils.asString(label || 'Open').replace(/"/g, '""') + '")';
+  }
+
+  function getOrCreateSheet_(sheetName) {
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(sheetName);
+    }
+    return sheet;
+  }
+
+  function resetSheet_(sheet) {
+    var maxRows = Math.max(sheet.getMaxRows(), 1);
+    var maxColumns = Math.max(sheet.getMaxColumns(), 1);
+    var filter = sheet.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+    sheet.getRange(1, 1, maxRows, maxColumns).breakApart();
+    sheet.clear();
+  }
+
+  function setColumnWidths_(sheet, widths) {
+    Object.keys(widths).forEach(function(columnIndex) {
+      sheet.setColumnWidth(parseInt(columnIndex, 10), widths[columnIndex]);
+    });
+  }
+
   function openPfmeaSpreadsheet_(config) {
     if (!SyncUtils.asString(config.PFMEA_SPREADSHEET_ID)) {
       throw new Error('PFMEA_SPREADSHEET_ID is blank. Set it in SYNC_CONFIG first.');
@@ -2192,6 +2622,7 @@ var ActualSyncService = (function() {
     validateSetup: validateSetup,
     previewSync: previewSync,
     runSync: runSync,
+    generateCleanDeliverables: generateCleanDeliverables,
     debugLinkSelection: debugLinkSelection,
     debugPfmeaSheet: debugPfmeaSheet,
     debugPfmeaWorkbookSummary: debugPfmeaWorkbookSummary,

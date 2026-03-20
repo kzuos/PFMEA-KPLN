@@ -696,10 +696,121 @@ var DocsService = (function() {
     return SyncUtils.asString(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  function createCleanWorkInstructionDocument(recordValues, options) {
+    var normalizedOptions = options || {};
+    var requestedDocId = SyncUtils.asString(normalizedOptions.docId || recordValues.DOC_ID);
+    var document;
+    var created = false;
+
+    if (requestedDocId && isDocumentAccessible_(requestedDocId)) {
+      document = DocumentApp.openById(requestedDocId);
+    } else {
+      document = DocumentApp.create(recordValues.TITLE || 'Clean Work Instruction');
+      created = true;
+    }
+
+    var file = DriveApp.getFileById(document.getId());
+    file.setName(recordValues.TITLE || file.getName());
+
+    if (normalizedOptions.folderId) {
+      try {
+        file.moveTo(DriveApp.getFolderById(normalizedOptions.folderId));
+      } catch (ignored) {
+        // Keep the document where it was created if the move fails.
+      }
+    }
+
+    renderCleanWorkInstruction_(document, recordValues);
+    document.saveAndClose();
+
+    return {
+      docId: document.getId(),
+      documentName: file.getName(),
+      documentUrl: 'https://docs.google.com/document/d/' + document.getId() + '/edit',
+      created: created
+    };
+  }
+
+  function renderCleanWorkInstruction_(document, recordValues) {
+    var body = document.getBody();
+    body.clear();
+
+    var title = body.appendParagraph(recordValues.TITLE || 'Clean Work Instruction');
+    title.setHeading(DocumentApp.ParagraphHeading.TITLE);
+
+    var intro = body.appendParagraph('Format-free draft generated from PFMEA data for content review.');
+    intro.editAsText().setItalic(0, intro.getText().length - 1, true).setForegroundColor(0, intro.getText().length - 1, '#5f6368');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Process Overview');
+    appendLabeledParagraph_(body, 'Link Key', recordValues.LINK_KEY);
+    appendLabeledParagraph_(body, 'Operation No', recordValues.PROCESS_NO);
+    appendLabeledParagraph_(body, 'Step Title', recordValues.STEP_TITLE);
+    appendLabeledParagraph_(body, 'Process Requirement', recordValues.PROCESS_REQUIREMENT);
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Key Characteristics');
+    appendLabeledParagraph_(body, 'Product Characteristics', recordValues.PRODUCT_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Process Characteristics', recordValues.PROCESS_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Special Characteristics', recordValues.SPECIAL_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Specification / Tolerance', recordValues.SPECIFICATION_TOLERANCE);
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Failure Risks');
+    appendBulletList_(body, recordValues.FAILURE_ITEMS, 'No failure risks were parsed from the selected PFMEA rows.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Controls');
+    appendSubheading_(body, 'Prevention Controls');
+    appendBulletList_(body, recordValues.PREVENTION_ITEMS, 'No prevention controls were provided in the PFMEA selection.');
+    appendSubheading_(body, 'Detection Controls');
+    appendBulletList_(body, recordValues.DETECTION_ITEMS, 'No detection controls were provided in the PFMEA selection.');
+    appendSubheading_(body, 'Control Method');
+    body.appendParagraph(SyncUtils.asString(recordValues.CONTROL_METHOD) || 'No control method summary was generated from the PFMEA selection.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Reaction Plan');
+    appendBulletList_(body, recordValues.REACTION_PLAN_ITEMS, 'No reaction plan was provided in the PFMEA selection.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Traceability');
+    appendLabeledParagraph_(body, 'PFMEA Sheet', recordValues.PFMEA_SHEET_NAME);
+    appendLabeledParagraph_(body, 'PFMEA Process', recordValues.PFMEA_PROCESS_NAME);
+    appendLabeledParagraph_(body, 'PFMEA Step Filter', recordValues.PFMEA_STEP_FILTER);
+    appendLabeledParagraph_(body, 'PFMEA Issue Nos', recordValues.PFMEA_ISSUE_NOS);
+    appendLabeledParagraph_(body, 'Source Row Count', String(recordValues.SOURCE_ROW_COUNT || '0'));
+    appendLabeledParagraph_(body, 'Generated At', recordValues.LAST_GENERATED_AT);
+  }
+
+  function appendCleanSectionHeading_(body, text) {
+    body.appendParagraph(text).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  }
+
+  function appendSubheading_(body, text) {
+    body.appendParagraph(text).setHeading(DocumentApp.ParagraphHeading.HEADING3);
+  }
+
+  function appendLabeledParagraph_(body, label, value) {
+    var normalizedValue = SyncUtils.asString(value) || 'Not provided in PFMEA.';
+    var paragraph = body.appendParagraph(label + ': ' + normalizedValue);
+    var text = paragraph.editAsText();
+    if (label) {
+      text.setBold(0, label.length, true);
+    }
+  }
+
+  function appendBulletList_(body, items, emptyMessage) {
+    var normalizedItems = items && items.length ? items : [emptyMessage];
+    normalizedItems.forEach(function(item) {
+      body.appendListItem(SyncUtils.asString(item));
+    });
+  }
+
   return {
     syncStepSection: syncStepSection,
     ensureWorkInstructionDocument: ensureWorkInstructionDocument,
     ensureGoogleDocTemplate: ensureGoogleDocTemplate,
-    isDocumentAccessible: isDocumentAccessible
+    isDocumentAccessible: isDocumentAccessible,
+    createCleanWorkInstructionDocument: createCleanWorkInstructionDocument
   };
 })();
