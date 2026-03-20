@@ -469,6 +469,10 @@ var ActualSyncService = (function() {
           PFMEA_ISSUE_NOS: cleanRecord.issueNoText,
           SOURCE_ROW_COUNT: cleanRecord.sourceRowCount,
           PROCESS_REQUIREMENT: cleanRecord.processRequirement,
+          PRODUCT_CHARACTERISTICS: cleanRecord.productCharacteristicsText,
+          PROCESS_CHARACTERISTICS: cleanRecord.processCharacteristicsText,
+          SPECIAL_CHARACTERISTICS: cleanRecord.specialCharacteristicsText,
+          SPECIFICATION_TOLERANCE: cleanRecord.specificationToleranceText,
           CONTROL_INTENT: iatfContext.controlIntent,
           DOCUMENT_REFERENCES: iatfContext.documentReferencesText,
           CONTROL_ROWS: iatfContext.controlRowsForDoc,
@@ -477,6 +481,7 @@ var ActualSyncService = (function() {
           DETECTION_ITEMS: cleanRecord.detectionItems,
           REACTION_ITEMS: iatfContext.reactionItems,
           GAP_ITEMS: iatfContext.wiGapItems,
+          COMPLETION_ITEMS: iatfContext.completionItems,
           LAST_GENERATED_AT: generatedAt
         }, {
           docId: existingIatfDoc.DOC_ID,
@@ -495,7 +500,7 @@ var ActualSyncService = (function() {
           iatfDoc.documentUrl,
           cleanRecord.issueNoText,
           String(iatfContext.controlRows.length),
-          String(iatfContext.totalGapCount),
+          String(iatfContext.openGapCount),
           generatedAt
         ]);
         iatfContext.gapRows.forEach(function(gapRow) {
@@ -504,8 +509,8 @@ var ActualSyncService = (function() {
 
         summary.iatfKplnRows += iatfContext.controlRows.length;
         summary.iatfWiDocs += 1;
-        summary.openGaps += iatfContext.totalGapCount;
-        if (iatfContext.totalGapCount > 0) {
+        summary.openGaps += iatfContext.openGapCount;
+        if (iatfContext.openGapCount > 0) {
           summary.ok = false;
         }
         logEntries.push(createActualLogEntry_(
@@ -517,7 +522,7 @@ var ActualSyncService = (function() {
           {
             docId: iatfDoc.docId,
             docName: iatfDoc.documentName,
-            gapCount: iatfContext.totalGapCount
+            gapCount: iatfContext.openGapCount
           },
           iatfDoc.created ? 'Created IATF-oriented WI draft.' : 'Updated IATF-oriented WI draft.'
         ));
@@ -987,6 +992,7 @@ var ActualSyncService = (function() {
     var controlRows = [];
     var gapRows = [];
     var wiGapItems = [];
+    var completionItems = [];
     var reactionItems = [];
 
     if (!kplnDetails.length) {
@@ -1064,15 +1070,15 @@ var ActualSyncService = (function() {
       }
     });
 
-    wiGapItems = SyncUtils.unique([
-      'Add operator safety / PPE instructions that are not present in PFMEA or KPLN source.',
-      'Add tool, fixture, and setup sequence details before plant release.',
-      'Attach visual standards or photos for inspection points where applicable.'
-    ]);
-
     if (!controlRows.length) {
       wiGapItems.push('No control plan characteristic rows were available for this WI draft.');
     }
+
+    completionItems = SyncUtils.unique([
+      'Confirm safety / PPE instructions with the responsible process owner before release.',
+      'Confirm tool, fixture, and setup sequence details at the work station before release.',
+      'Attach visual standards or photos for inspection points where applicable.'
+    ]);
 
     return {
       controlRows: controlRows,
@@ -1081,8 +1087,9 @@ var ActualSyncService = (function() {
       documentReferencesText: buildDocumentReferencesText_(controlRows),
       reactionItems: SyncUtils.unique(reactionItems),
       wiGapItems: wiGapItems,
+      completionItems: completionItems,
       gapRows: gapRows,
-      totalGapCount: gapRows.length + wiGapItems.length
+      openGapCount: gapRows.length + wiGapItems.length
     };
   }
 

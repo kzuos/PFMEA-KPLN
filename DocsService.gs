@@ -864,6 +864,10 @@ var DocsService = (function() {
 
     appendCleanSectionHeading_(body, 'Standardized Work Summary');
     appendLabeledParagraph_(body, 'Process Requirement', recordValues.PROCESS_REQUIREMENT);
+    appendLabeledParagraph_(body, 'Product Characteristics', recordValues.PRODUCT_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Process Characteristics', recordValues.PROCESS_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Special Characteristics', recordValues.SPECIAL_CHARACTERISTICS);
+    appendLabeledParagraph_(body, 'Specification / Tolerance', recordValues.SPECIFICATION_TOLERANCE);
     appendLabeledParagraph_(body, 'Control Intent', recordValues.CONTROL_INTENT);
     appendLabeledParagraph_(body, 'Required References', recordValues.DOCUMENT_REFERENCES);
     body.appendParagraph('');
@@ -886,6 +890,10 @@ var DocsService = (function() {
 
     appendCleanSectionHeading_(body, 'Release Gaps To Close');
     appendBulletList_(body, recordValues.GAP_ITEMS, 'No open content gaps were detected from the available PFMEA and KPLN data.');
+    body.appendParagraph('');
+
+    appendCleanSectionHeading_(body, 'Plant Completion Before Release');
+    appendBulletList_(body, recordValues.COMPLETION_ITEMS, 'No additional plant completion items were recorded.');
     body.appendParagraph('');
 
     appendCleanSectionHeading_(body, 'Generated At');
