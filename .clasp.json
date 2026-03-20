@@ -1,0 +1,22 @@
+{
+  "scriptId": "1ENKtq_7pKJU7XAJ-3V3ypDz8kHv_y1P6jDZXCYJzScnPWDMURwnjQ09v",
+  "rootDir": ".",
+  "scriptExtensions": [
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "filePushOrder": [
+    "Code.gs",
+    "ActualSyncService.gs",
+    "Config.gs",
+    "DocsService.gs",
+    "LogService.gs",
+    "MappingService.gs",
+    "SheetsService.gs",
+    "SyncService.gs",
+    "UI.gs",
+    "Validation.gs"
+  ]
+}
