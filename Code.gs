@@ -22,6 +22,10 @@ function refreshActualTemplates() {
   return UIService.refreshActualTemplatesAction();
 }
 
+function validateActualSync() {
+  return UIService.validateActualSyncAction();
+}
+
 function previewActualSync() {
   return UIService.previewActualSyncAction();
 }

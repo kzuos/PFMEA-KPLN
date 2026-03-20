@@ -5,6 +5,7 @@ var UIService = (function() {
       .addItem('Setup Actual Sync', 'setupActualSync')
       .addItem('Refresh Link Matrix', 'refreshActualLinks')
       .addItem('Refresh WI Templates', 'refreshActualTemplates')
+      .addItem('Validate Actual Sync', 'validateActualSync')
       .addItem('Preview Actual Sync', 'previewActualSync')
       .addItem('Run Actual Sync', 'runActualSync')
       .addSeparator()
@@ -189,6 +190,14 @@ var UIService = (function() {
     });
   }
 
+  function validateActualSyncAction() {
+    return runActualAction_(function() {
+      var result = ActualSyncService.validateSetup();
+      showActualValidation_(result);
+      return result;
+    });
+  }
+
   function refreshActualTemplatesAction() {
     return runActualAction_(function() {
       var result = ActualSyncService.refreshTemplates();
@@ -244,6 +253,25 @@ var UIService = (function() {
     ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
   }
 
+  function showActualValidation_(result) {
+    var ui = SpreadsheetApp.getUi();
+    var linkSummary = result.linkSummary || {};
+    var templateSummary = result.templateSummary || {};
+    var message = [
+      result.ok ? 'Actual sync preflight passed.' : 'Actual sync preflight found issues.',
+      'Links total: ' + (linkSummary.total || 0),
+      'Active / Approved / Suggested / Unmapped: ' +
+        (linkSummary.active || 0) + ' / ' +
+        (linkSummary.approved || 0) + ' / ' +
+        (linkSummary.suggested || 0) + ' / ' +
+        (linkSummary.unmapped || 0),
+      'Templates ready: ' + (templateSummary.ready || 0) + ' / ' + (templateSummary.active || 0) + ' active',
+      result.errors.length ? 'Errors: ' + result.errors.join(' | ') : 'Errors: none',
+      result.warnings.length ? 'Warnings: ' + result.warnings.join(' | ') : 'Warnings: none'
+    ].join('\n');
+    ui.alert(APP_CONSTANTS.PROJECT_NAME, message, ui.ButtonSet.OK);
+  }
+
   function runActualAction_(action) {
     try {
       return action();
@@ -265,6 +293,7 @@ var UIService = (function() {
     setupActualSyncAction: setupActualSyncAction,
     refreshActualLinksAction: refreshActualLinksAction,
     refreshActualTemplatesAction: refreshActualTemplatesAction,
+    validateActualSyncAction: validateActualSyncAction,
     previewActualSyncAction: previewActualSyncAction,
     runActualSyncAction: runActualSyncAction,
     openActualConfigAction: openActualConfigAction,

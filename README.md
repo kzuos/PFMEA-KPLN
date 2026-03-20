@@ -188,6 +188,7 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 - `Setup Actual Sync`: creates the actual rollout helper sheets, seeds `SYNC_CONFIG`, ensures the WI folder exists, and refreshes links when the required config is present.
 - `Refresh Link Matrix`: rescans PFMEA sheets and KPLN blocks, then rebuilds `SYNC_LINKS` and `PFMEA_SYNC_VIEW`.
 - `Refresh WI Templates`: reindexes the template catalog from `WI_TEMPLATE_FOLDER_ID`.
+- `Validate Actual Sync`: runs a preflight check over config, approved links, and template readiness before preview or live sync.
 - `Preview Actual Sync`: dry-run for approved rows in `SYNC_LINKS`.
 - `Run Actual Sync`: writes approved KPLN and Work Instruction updates for `SYNC_LINKS`.
 - `Open Actual Config`: jumps to `SYNC_CONFIG`.
@@ -209,10 +210,12 @@ The manifest is included in `appsscript.json` and already contains the scopes ne
 1. Run `Setup Actual Sync`.
 2. Fill `PFMEA_SPREADSHEET_ID` and `KPLN_SHEET_NAME` in `SYNC_CONFIG`.
 3. Run `Refresh Link Matrix`.
-4. Review `WI_TEMPLATES` and confirm template routing.
-5. Review `SYNC_LINKS`, fix suggestions, and mark only trusted rows as `APPROVED`.
-6. Run `Preview Actual Sync`.
-7. If the preview looks correct, run `Run Actual Sync`.
+4. Run `Refresh WI Templates`.
+5. Review `WI_TEMPLATES` and confirm template routing.
+6. Review `SYNC_LINKS`, fix suggestions, and mark only trusted rows as `APPROVED`.
+7. Run `Validate Actual Sync`.
+8. Run `Preview Actual Sync`.
+9. If the preview looks correct, run `Run Actual Sync`.
 
 ## 11. Example workflow
 1. A quality engineer edits PFMEA row `PFR-1234ABCD` for `STEP-OP10`.

@@ -139,6 +139,34 @@ var ActualSyncService = (function() {
     };
   }
 
+  function validateSetup() {
+    ensureHelperSheets_();
+    writeConfigDefaults_();
+
+    var config = getConfig_();
+    var validation = validateActualConfiguration_(config);
+    var sourceSpreadsheet = null;
+    var kplnSheet = null;
+
+    if (validation.ok) {
+      sourceSpreadsheet = openPfmeaSpreadsheet_(config);
+      kplnSheet = getSheet_(config.KPLN_SHEET_NAME);
+    }
+
+    var templates = loadTemplateRows_();
+    var links = loadAllLinkRows_();
+    var linkSummary = buildLinkValidationSummary_(links, config, sourceSpreadsheet, kplnSheet, templates);
+    var templateSummary = buildTemplateValidationSummary_(templates);
+
+    return {
+      ok: validation.errors.concat(linkSummary.errors).length === 0,
+      errors: validation.errors.concat(linkSummary.errors),
+      warnings: validation.warnings.concat(linkSummary.warnings, templateSummary.warnings),
+      linkSummary: linkSummary,
+      templateSummary: templateSummary
+    };
+  }
+
   function previewSync() {
     return runSync_(true, 'ACTUAL_PREVIEW');
   }
@@ -1044,18 +1072,8 @@ var ActualSyncService = (function() {
   }
 
   function loadExistingLinkRows_() {
-    var sheet = getSheet_(CONSTANTS.LINKS_SHEET);
-    var lastRow = sheet.getLastRow();
     var map = {};
-    if (lastRow <= 1) {
-      return map;
-    }
-    var rows = sheet.getRange(2, 1, lastRow - 1, CONSTANTS.LINKS_HEADERS.length).getDisplayValues();
-    rows.forEach(function(row) {
-      var record = {};
-      CONSTANTS.LINKS_HEADERS.forEach(function(header, index) {
-        record[header] = SyncUtils.asString(row[index]);
-      });
+    loadAllLinkRows_().forEach(function(record) {
       if (record.LINK_KEY) {
         map[record.LINK_KEY] = record;
       }
@@ -1064,6 +1082,18 @@ var ActualSyncService = (function() {
   }
 
   function loadSyncLinks_(config) {
+    return loadAllLinkRows_().filter(function(link) {
+      if (!SyncUtils.toBoolean(link.ACTIVE)) {
+        return false;
+      }
+      if (SyncUtils.asString(link.LINK_STATUS) === CONSTANTS.LINK_STATUS.IGNORE) {
+        return false;
+      }
+      return !SyncUtils.toBoolean(config.ONLY_APPROVED_LINKS) || link.LINK_STATUS === CONSTANTS.LINK_STATUS.APPROVED;
+    });
+  }
+
+  function loadAllLinkRows_() {
     var sheet = getSheet_(CONSTANTS.LINKS_SHEET);
     var lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
@@ -1076,14 +1106,8 @@ var ActualSyncService = (function() {
         record[header] = SyncUtils.asString(row[index]);
       });
       return record;
-    }).filter(function(link) {
-      if (!SyncUtils.toBoolean(link.ACTIVE)) {
-        return false;
-      }
-      if (SyncUtils.asString(link.LINK_STATUS) === CONSTANTS.LINK_STATUS.IGNORE) {
-        return false;
-      }
-      return !SyncUtils.toBoolean(config.ONLY_APPROVED_LINKS) || link.LINK_STATUS === CONSTANTS.LINK_STATUS.APPROVED;
+    }).filter(function(record) {
+      return !!record.LINK_KEY;
     });
   }
 
@@ -1222,6 +1246,145 @@ var ActualSyncService = (function() {
       }
     });
     return map;
+  }
+
+  function buildLinkValidationSummary_(links, config, sourceSpreadsheet, kplnSheet, templates) {
+    var summary = {
+      total: links.length,
+      active: 0,
+      approved: 0,
+      suggested: 0,
+      unmapped: 0,
+      ignored: 0,
+      inactive: 0,
+      approvedMissingPfmeaSheet: 0,
+      approvedInvalidKplnRow: 0,
+      approvedMissingTemplateConfig: 0,
+      approvedMissingWiDocAssignment: 0,
+      errors: [],
+      warnings: []
+    };
+    var pfmeaSheetMap = {};
+    var kplnLastRow = kplnSheet ? kplnSheet.getLastRow() : 0;
+    var kplnDataStartRow = toNumber_(config.KPLN_DATA_START_ROW);
+
+    if (sourceSpreadsheet) {
+      sourceSpreadsheet.getSheets().forEach(function(sheet) {
+        pfmeaSheetMap[sheet.getName()] = true;
+      });
+    }
+
+    links.forEach(function(link) {
+      var status = SyncUtils.asString(link.LINK_STATUS) || CONSTANTS.LINK_STATUS.UNMAPPED;
+      var isActive = SyncUtils.toBoolean(link.ACTIVE);
+
+      if (!isActive) {
+        summary.inactive += 1;
+      } else {
+        summary.active += 1;
+      }
+
+      if (status === CONSTANTS.LINK_STATUS.APPROVED) {
+        summary.approved += 1;
+      } else if (status === CONSTANTS.LINK_STATUS.SUGGESTED) {
+        summary.suggested += 1;
+      } else if (status === CONSTANTS.LINK_STATUS.IGNORE) {
+        summary.ignored += 1;
+      } else {
+        summary.unmapped += 1;
+      }
+
+      if (!isActive || status !== CONSTANTS.LINK_STATUS.APPROVED) {
+        return;
+      }
+
+      if (!SyncUtils.asString(link.PFMEA_SHEET_NAME)) {
+        summary.approvedMissingPfmeaSheet += 1;
+      } else if (sourceSpreadsheet && !pfmeaSheetMap[link.PFMEA_SHEET_NAME]) {
+        summary.approvedMissingPfmeaSheet += 1;
+      }
+
+      if (kplnSheet) {
+        var rowStart = toNumber_(link.KPLN_ROW_START);
+        if (rowStart < kplnDataStartRow || rowStart > kplnLastRow) {
+          summary.approvedInvalidKplnRow += 1;
+        }
+      }
+
+      if (SyncUtils.toBoolean(link.UPDATE_WI)) {
+        var templateKey = SyncUtils.asString(link.WI_TEMPLATE_KEY) || 'GENERIC_MANAGED';
+        var templateRow = templates[templateKey];
+        if (templateKey !== 'GENERIC_MANAGED' && (!templateRow || !hasUsableTemplateConfig_(templateRow))) {
+          summary.approvedMissingTemplateConfig += 1;
+        }
+        if (!SyncUtils.asString(link.WI_DOC_ID) && !SyncUtils.toBoolean(config.CREATE_MISSING_WI_DOCS)) {
+          summary.approvedMissingWiDocAssignment += 1;
+        }
+      }
+    });
+
+    if (!summary.total) {
+      summary.warnings.push('SYNC_LINKS is empty. Run Refresh Link Matrix before previewing or syncing.');
+    }
+    if (summary.active && !summary.approved) {
+      summary.warnings.push('No active APPROVED links are ready for preview or sync yet.');
+    }
+    if (summary.suggested) {
+      summary.warnings.push('SUGGESTED links still need review: ' + summary.suggested);
+    }
+    if (summary.unmapped) {
+      summary.warnings.push('UNMAPPED links still need manual mapping: ' + summary.unmapped);
+    }
+    if (summary.approvedMissingPfmeaSheet) {
+      summary.errors.push('Approved links with missing or invalid PFMEA_SHEET_NAME: ' + summary.approvedMissingPfmeaSheet);
+    }
+    if (summary.approvedInvalidKplnRow) {
+      summary.errors.push('Approved links with invalid KPLN_ROW_START: ' + summary.approvedInvalidKplnRow);
+    }
+    if (summary.approvedMissingTemplateConfig) {
+      summary.warnings.push('Approved WI links missing a usable template configuration: ' + summary.approvedMissingTemplateConfig);
+    }
+    if (summary.approvedMissingWiDocAssignment) {
+      summary.warnings.push('Approved WI links have no WI_DOC_ID and CREATE_MISSING_WI_DOCS is FALSE: ' + summary.approvedMissingWiDocAssignment);
+    }
+
+    return summary;
+  }
+
+  function buildTemplateValidationSummary_(templates) {
+    var templateKeys = Object.keys(templates);
+    var summary = {
+      total: templateKeys.length,
+      active: 0,
+      ready: 0,
+      missingConfig: 0,
+      warnings: []
+    };
+
+    templateKeys.forEach(function(templateKey) {
+      var templateRow = templates[templateKey];
+      if (!SyncUtils.toBoolean(templateRow.ACTIVE)) {
+        return;
+      }
+      summary.active += 1;
+      if (templateKey === 'GENERIC_MANAGED' || hasUsableTemplateConfig_(templateRow)) {
+        summary.ready += 1;
+      } else {
+        summary.missingConfig += 1;
+      }
+    });
+
+    if (!summary.total) {
+      summary.warnings.push('WI_TEMPLATES has no rows yet. Run Refresh WI Templates.');
+    } else if (summary.missingConfig) {
+      summary.warnings.push('Active WI template rows missing a source file or Google template doc: ' + summary.missingConfig);
+    }
+
+    return summary;
+  }
+
+  function hasUsableTemplateConfig_(templateRow) {
+    return !!SyncUtils.asString(templateRow.GOOGLE_TEMPLATE_DOC_ID) || !!SyncUtils.asString(templateRow.SOURCE_FILE_ID);
   }
 
   function getTemplateRowByKey_(templateKey) {
@@ -1476,6 +1639,7 @@ var ActualSyncService = (function() {
     setup: setup,
     refreshLinks: refreshLinks,
     refreshTemplates: refreshTemplates,
+    validateSetup: validateSetup,
     previewSync: previewSync,
     runSync: runSync,
     openConfig: openConfig,
